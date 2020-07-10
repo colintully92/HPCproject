@@ -1,0 +1,1056 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                          S u m m a r y   R e p o r t
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Compilation
+-----------
+File     : /users/course40/Project/stencil2d-mpiomp.F90
+Compiled : 07/09/20  18:16:39
+Compiler : Version 9.0.2
+Ftnlx    : Version 9.0.2 
+Target   : x86-64
+Command  : ftn_driver.exe -hcpu=haswell -hdynamic -D__CRAYXC -D__CRAY_HASWELL
+           -D__CRAYXT_COMPUTE_LINUX_TARGET -hnetwork=aries
+           -I/opt/cray/pe/perftools/7.1.1/include -DCRAYPAT -hpat_trace
+           -homp_trace -O3 -hfp3 -eZ -ffree -N255 -ec -eC -eI -eF -rm -homp
+           -c stencil2d-mpiomp.F90
+           -I/opt/cray/pe/cce/9.0.2/cce-clang/x86_64/lib/clang/9.0.0/include
+           -I/opt/cray/pe/cce/9.0.2/cce/x86_64/include/craylibs -I/usr/include
+           -I/usr/include -I/opt/cray/pe/libsci/19.06.1/CRAY/9.0/x86_64/include
+           -I/opt/cray/pe/mpt/7.7.10/gni/mpich-cray/9.0/include
+           -I/opt/nvidia/cudatoolkit10/10.1.105_3.27-7.0.1.1_4.1__ga311ce7/inclu
+           de
+           -I/opt/nvidia/cudatoolkit10/10.1.105_3.27-7.0.1.1_4.1__ga311ce7/extra
+           s/CUPTI/include
+           -I/opt/nvidia/cudatoolkit10/10.1.105_3.27-7.0.1.1_4.1__ga311ce7/nvvm/
+           include -I/opt/cray/rca/2.2.20-7.0.1.1_4.9__g8e3fb5b.ari/include
+           -I/opt/cray/pe/pmi/5.0.14/include
+           -I/opt/cray/xpmem/2.2.19-7.0.1.1_3.7__gdcf436c.ari/include
+           -I/opt/cray/dmapp/7.1.1-7.0.1.1_4.8__g38cf134.ari/include
+           -I/opt/cray/alps/6.6.56-7.0.1.1_4.10__g2e60a7e4.ari/include
+           -I/opt/cray/wlm_detect/1.3.3-7.0.1.1_4.6__g7109084.ari/include
+           -I/opt/cray/ugni/6.0.14.0-7.0.1.1_7.10__ge78e5b0.ari/include
+           -I/opt/cray/gni-headers/5.0.12.0-7.0.1.1_6.7__g3b1768f.ari/include
+           -I/opt/cray/alps/6.6.56-7.0.1.1_4.10__g2e60a7e4.ari/include
+           -I/opt/cray/krca/2.2.6-7.0.1.1_5.8__gb641b12.ari/include
+           -I/opt/cray-hss-devel/9.0.0/include
+           -I/opt/cray/udreg/2.3.2-7.0.1.1_3.9__g8175d3d.ari/include
+Program
+  Units  : MAIN
+
+ftnlx report
+------------
+Source   : /users/course40/Project/stencil2d-mpiomp.F90
+Date     : 07/09/2020  18:16:41
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                          S o u r c e   L i s t i n g
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+     %%%    L o o p m a r k   L e g e n d    %%%
+
+     Primary Loop Type        Modifiers
+     ------- ---- ----        ---------
+     A - Pattern matched      a - atomic memory operation
+                              b - blocked
+     C - Collapsed            c - conditional and/or computed
+     D - Deleted               
+     E - Cloned                
+     F - Flat - No calls      f - fused
+     G - Accelerated          g - partitioned
+     I - Inlined              i - interchanged
+     M - Multithreaded        m - partitioned
+                              n - non-blocking remote transfer
+                              p - partial
+     R - Rerolling            r - unrolled
+                              s - shortloop
+     V - Vectorized           w - unwound
+
+     + - More messages listed at end of listing
+     ------------------------------------------
+
+
+    1.                        ! ******************************************************
+    2.                        !     Program: stencil2d
+    3.                        !      Author: Oliver Fuhrer
+    4.                        !       Email: oliverf@vulcan.com
+    5.                        !        Date: 20.05.2020
+    6.                        ! Description: Simple stencil example (4th-order diffusion)
+    7.                        ! ******************************************************
+    8.                        
+    9.                        ! Driver for apply_diffusion() that sets up fields and does timings
+   10.                        program main
+   11.                            use mpi, only: MPI_COMM_WORLD
+   12.                            use m_utils, only: timer_init, timer_start, timer_end, timer_get, is_master, num_rank, write_field_to_file
+   13.  + I                       use m_partitioner, only: Partitioner
+   14.                            implicit none
+   15.                        
+   16.                            ! constants
+   17.                            integer, parameter :: wp = 4
+   18.                        
+   19.                            ! local
+   20.                            integer :: global_nx, global_ny, global_nz, num_iter
+   21.                            logical :: scan
+   22.                        
+   23.                            integer :: num_halo = 2
+   24.                            real (kind=wp) :: alpha = 1.0_wp / 32.0_wp
+   25.                        
+   26.                            real (kind=wp), allocatable :: in_field(:, :, :), f_in(:, :, :)
+   27.                            real (kind=wp), allocatable :: out_field(:, :, :), f_out(:, :, :)
+   28.                        
+   29.                            integer :: timer_work
+   30.                            real (kind=8) :: runtime
+   31.                        
+   32.                            integer :: cur_setup, num_setups = 1
+   33.                            integer :: nx_setups(7) = (/ 16, 32, 48, 64, 96, 128, 192 /)
+   34.                            integer :: ny_setups(7) = (/ 16, 32, 48, 64, 96, 128, 192 /)
+   35.                        
+   36.                            type(Partitioner) :: p
+   37.                        
+   38.                        #ifdef CRAYPAT
+   39.                            include "pat_apif.h"
+   40.                            integer :: istat
+   41.                            
+   42.                            !CT ADDED
+   43.    M-----------------<     !$omp parallel
+   44.    M                       !$omp master
+   45.    M                       !$ write(*,*) '#threads = ', omp_get_num_threads()
+   46.    M                       !$omp end master
+   47.    M----------------->     !$omp end parallel
+   48.                            !CT close
+   49.                            
+   50.  +                         call PAT_record( PAT_STATE_OFF, istat )
+   51.                        #endif
+   52.                        
+   53.  +                         call init()
+   54.                        
+   55.  +                         if ( is_master() ) then
+   56.                                write(*, '(a)') '# ranks nx ny ny nz num_iter time'
+   57.                                write(*, '(a)') 'data = np.array( [ \'
+   58.                            end if
+   59.                        
+   60.                            if ( scan ) num_setups = size(nx_setups) * size(ny_setups)
+   61.  + 1-----------------<     do cur_setup = 0, num_setups - 1
+   62.    1                   
+   63.  + 1                           call timer_init()
+   64.    1                   
+   65.    1                           if ( scan ) then
+   66.    1                               global_nx = nx_setups( modulo(cur_setup, size(ny_setups) ) + 1 )
+   67.    1                               global_ny = ny_setups( cur_setup / size(ny_setups) + 1 )
+   68.    1                           end if
+   69.    1                   
+   70.  + 1                           if ( is_master() ) &
+   71.  + 1                               call setup()
+   72.    1                   
+   73.  + 1                           if ( .not. scan .and. is_master() ) &
+   74.  + 1                               call write_field_to_file( in_field, num_halo, "in_field_mpiomp.dat" )
+   75.    1                   
+   76.  + 1                           p = Partitioner(MPI_COMM_WORLD, (/global_nx, global_ny, global_nz/), num_halo, periodic=(/.true., .true./))
+   77.    1                   
+   78.  + 1 AC-------------<>         f_in = p%scatter(in_field, root=0)
+   79.    1                           allocate(f_out, source=f_in)
+   80.    1                   
+   81.    1                           ! warmup caches
+   82.  + 1                           call apply_diffusion( f_in, f_out, alpha, num_iter=1, p=p )
+   83.    1                   
+   84.    1                           ! time the actual work
+   85.    1                   #ifdef CRAYPAT
+   86.  + 1                           call PAT_record( PAT_STATE_ON, istat )
+   87.    1                   #endif
+   88.    1                           timer_work = -999
+   89.  + 1                           call timer_start('work', timer_work)
+   90.    1                   
+   91.  + 1                           call apply_diffusion( f_in, f_out, alpha, num_iter=num_iter, p=p )
+   92.    1                   
+   93.  + 1                           call timer_end( timer_work )
+   94.    1                   #ifdef CRAYPAT
+   95.  + 1                           call PAT_record( PAT_STATE_OFF, istat )
+   96.    1                   #endif
+   97.    1                   
+   98.  + 1                           call update_halo( f_out, p )
+   99.    1                   
+  100.  + 1 AC-------------<>         out_field = p%gather(f_out, root=0)
+  101.    1                   
+  102.  + 1                           if ( .not. scan .and. is_master() ) &
+  103.  + 1                               call write_field_to_file( out_field, num_halo, "out_field_mpiomp.dat" )
+  104.    1                   
+  105.  + 1                           if ( is_master() ) &
+  106.    1 I                             call cleanup()
+  107.    1                   
+  108.  + 1                           runtime = timer_get( timer_work )
+  109.  + 1                           if ( is_master() ) &
+  110.    1                               write(*, '(a, i5, a, i5, a, i5, a, i5, a, i8, a, e15.7, a)') &
+  111.  + 1                                   '[', num_rank(), ',', global_nx, ',', global_ny, ',', global_nz, &
+  112.    1                                   ',', num_iter, ',', runtime, '], \'
+  113.    1                   
+  114.    1----------------->     end do
+  115.                        
+  116.  +                         if ( is_master() ) then
+  117.                                write(*, '(a)') '] )'
+  118.                            end if
+  119.                        
+  120.  +                         call finalize()
+  121.                        
+  122.                        contains
+  123.                        
+  124.                        
+  125.                            ! Integrate 4th-order diffusion equation by a certain number of iterations.
+  126.                            !
+  127.                            !  in_field          -- input field (nx x ny x nz with halo in x- and y-direction)
+  128.                            !  out_field         -- result (must be same size as in_field)
+  129.                            !  alpha             -- diffusion coefficient (dimensionless)
+  130.                            !  num_iter          -- number of iterations to execute
+  131.                            !
+  132.                            subroutine apply_diffusion( in_field, out_field, alpha, num_iter, p )
+  133.                                implicit none
+  134.                        
+  135.                                ! arguments
+  136.                                real (kind=wp), intent(inout) :: in_field(:, :, :)
+  137.                                real (kind=wp), intent(inout) :: out_field(:, :, :)
+  138.                                real (kind=wp), intent(in) :: alpha
+  139.                                integer, intent(in) :: num_iter
+  140.                                type(Partitioner), intent(in) :: p
+  141.                        
+  142.                                ! local
+  143.                                real (kind=wp), save, allocatable :: tmp1_field(:, :)
+  144.                                !real (kind=wp), save, allocatable :: tmp2_field(:, :)
+  145.                                real (kind=wp) :: laplap
+  146.                                integer :: iter, i, j, k
+  147.                                integer :: dims(3), nx, ny, nz
+  148.                        
+  149.  + w I--------------<>         dims = p%shape()
+  150.                                nx = dims(1) - 2 * p%num_halo()
+  151.    I                           ny = dims(2) - 2 * p%num_halo()
+  152.                                nz = dims(3)
+  153.                        
+  154.                                ! this is only done the first time this subroutine is called (warmup)
+  155.                                ! or when the dimensions of the fields change
+  156.  +                             if ( allocated(tmp1_field) .and. &
+  157.                                    any( shape(tmp1_field) /= (/nx + 2 * num_halo, ny + 2 * num_halo /) ) ) then
+  158.                                    deallocate( tmp1_field)
+  159.                                end if
+  160.                                if ( .not. allocated(tmp1_field) ) then
+  161.                                    allocate( tmp1_field(nx + 2 * num_halo, ny + 2 * num_halo) )
+  162.                                    !allocate( tmp2_field(nx + 2 * num_halo, ny + 2 * num_halo, nz) )
+  163.    AC---------------<>             tmp1_field = 0.0_wp
+  164.                                    !tmp2_field = 0.0_wp
+  165.                                end if
+  166.                        
+  167.  + 1-----------------<         do iter = 1, num_iter
+  168.    1                   
+  169.  + 1                               call update_halo( in_field, p )
+  170.    1                               
+  171.    1                               !CT ADDED
+  172.    1 M---------------<              !$omp parallel do default(none) private(tmp1_field, laplap) shared(in_field, out_field, nx, ny, nz, num_halo, num_iter, alpha)
+  173.  + 1 M m-------------<              do k = lbound(out_field,3), ubound(out_field,3) 
+  174.  + 1 M m b-----------<                 do j = lbound(out_field,2) + num_halo - 1, ubound(out_field,2) - num_halo + 1
+  175.    1 M m b Vbr2------<                 do i = lbound(out_field,1) + num_halo - 1, ubound(out_field,1) - num_halo + 1
+  176.    1 M m b Vbr2                            tmp1_field(i, j) = -4._wp * in_field(i, j, k)        &
+  177.    1 M m b Vbr2                                + in_field(i - 1, j, k) + in_field(i + 1, j, k)  &
+  178.    1 M m b Vbr2                                + in_field(i, j - 1, k) + in_field(i, j + 1, k)
+  179.    1 M m b Vbr2------>                 end do
+  180.    1 M m b----------->                 end do
+  181.    1 M m               
+  182.  + 1 M m b-----------<                 do j = lbound(out_field,2) + num_halo, ubound(out_field,2) - num_halo
+  183.    1 M m b Vpbr2-----<                 do i = lbound(out_field,1) + num_halo, ubound(out_field,1) - num_halo
+  184.    1 M m b Vpbr2                       
+  185.    1 M m b Vpbr2                           laplap = -4._wp * tmp1_field(i, j)       &
+  186.    1 M m b Vpbr2                               + tmp1_field(i - 1, j) + tmp1_field(i + 1, j)  &
+  187.    1 M m b Vpbr2                               + tmp1_field(i, j - 1) + tmp1_field(i, j + 1)
+  188.    1 M m b Vpbr2                               
+  189.    1 M m b Vpbr2                           if ( iter == num_iter ) then
+  190.    1 M m b Vpbr2                               out_field(i, j, k) = in_field(i, j, k) - alpha * laplap
+  191.    1 M m b Vpbr2                           else
+  192.    1 M m b Vpbr2                               in_field(i, j, k)  = in_field(i, j, k) - alpha * laplap
+  193.    1 M m b Vpbr2                           end if
+  194.    1 M m b Vpbr2                           
+  195.    1 M m b Vpbr2----->                 end do
+  196.    1 M m b----------->                 end do
+  197.    1 M m               
+  198.    1 M m------------->             end do
+  199.    1 M--------------->             !$omp end parallel do
+  200.    1----------------->         end do
+  201.                                    !CT close
+  202.                                    
+  203.                                    !call laplacian( in_field, tmp1_field, num_halo, extend=1 )
+  204.                                    !call laplacian( tmp1_field, tmp2_field, num_halo, extend=0 )
+  205.                        
+  206.                                    ! do forward in time step
+  207.                                    !do k = lbound(out_field,3), ubound(out_field,3)
+  208.                                    !do j = lbound(out_field,2) + num_halo, ubound(out_field,2) - num_halo
+  209.                                    !do i = lbound(out_field,1) + num_halo, ubound(out_field,1) - num_halo
+  210.                                    !    out_field(i, j, k) = in_field(i, j, k) - alpha * tmp2_field(i, j, k)
+  211.                                    !end do
+  212.                                    !end do
+  213.                                    !end do
+  214.                        
+  215.                                    ! copy out to in in caes this is not the last iteration
+  216.                                    !if ( iter /= num_iter ) then
+  217.                                    !    do k = lbound(in_field,3), ubound(in_field,3)
+  218.                                    !    do j = lbound(in_field,2) + num_halo, ubound(in_field,2) - num_halo
+  219.                                    !    do i = lbound(in_field,1) + num_halo, ubound(in_field,1) - num_halo
+  220.                                    !        in_field(i, j, k) = out_field(i, j, k)
+  221.                                    !    end do
+  222.                                    !    end do
+  223.                                    !    end do
+  224.                                    !end if
+  225.                        
+  226.                                !end do
+  227.                        
+  228.                            end subroutine apply_diffusion
+  229.                        
+  230.                        
+  231.                            ! Compute Laplacian using 2nd-order centered differences.
+  232.                            !
+  233.                            !  in_field          -- input field (nx x ny x nz with halo in x- and y-direction)
+  234.                            !  lap_field         -- result (must be same size as in_field)
+  235.                            !  num_halo          -- number of halo points
+  236.                            !  extend            -- extend computation into halo-zone by this number of points
+  237.                            !
+  238.                           !subroutine laplacian( field, lap, num_halo, extend )
+  239.                           !     implicit none
+  240.                        
+  241.                                ! argument
+  242.                           !     real (kind=wp), intent(in) :: field(:, :, :)
+  243.                           !     real (kind=wp), intent(inout) :: lap(:, :, :)
+  244.                           !     integer, intent(in) :: num_halo, extend
+  245.                        
+  246.                                ! local
+  247.                            !    integer :: i, j, k
+  248.                        
+  249.                             !   do k = lbound(field,3), ubound(field,3)
+  250.                             !   do j = lbound(field,2) + num_halo - extend, ubound(field,2) - num_halo + extend
+  251.                             !   do i = lbound(field,1) + num_halo - extend, ubound(field,1) - num_halo + extend
+  252.                              !      lap(i, j, k) = -4._wp * field(i, j, k)      &
+  253.                              !          + field(i - 1, j, k) + field(i + 1, j, k)  &
+  254.                              !          + field(i, j - 1, k) + field(i, j + 1, k)
+  255.                               ! end do
+  256.                               ! end do
+  257.                               ! end do
+  258.                        
+  259.                            !end subroutine laplacian
+  260.                        
+  261.                        
+  262.                            ! Update the halo-zone using an up/down and left/right strategy.
+  263.                            !
+  264.                            !  field             -- input/output field (nz x ny x nx with halo in x- and y-direction)
+  265.                            !
+  266.                            !  Note: corners are updated in the left/right phase of the halo-update
+  267.                            !
+  268.                            subroutine update_halo( field, p )
+  269.                                use mpi !, only : MPI_FLOAT, MPI_DOUBLE, MPI_SUCCESS, MPI_STATUS_SIZE, &
+  270.                                     !Irecv, MPI_Isend, MPI_Waitall
+  271.                                use m_utils, only : error
+  272.                                implicit none
+  273.                        
+  274.                                ! argument
+  275.                                real (kind=wp), intent(inout) :: field(:, :, :)
+  276.                                type(Partitioner), intent(in) :: p
+  277.                        
+  278.                                ! local
+  279.                                integer :: i, j, k
+  280.                                integer :: dims(3), nx, ny, nz
+  281.                                integer :: lr_size, tb_size, dtype
+  282.                                integer :: tb_req(4), lr_req(4)
+  283.                                integer :: ierror, status(MPI_STATUS_SIZE, 4), icount
+  284.                                real (kind=wp), save, allocatable :: sndbuf_l(:), sndbuf_r(:), sndbuf_t(:), sndbuf_b(:)
+  285.                                real (kind=wp), save, allocatable :: rcvbuf_l(:), rcvbuf_r(:), rcvbuf_t(:), rcvbuf_b(:)
+  286.                        
+  287.                                ! set datatype
+  288.                                if (wp == 4) then
+  289.                                    dtype = MPI_FLOAT
+  290.                                else
+  291.                                    dtype = MPI_DOUBLE
+  292.                                end if
+  293.                        
+  294.                                ! get dimensions
+  295.  + w I--------------<>         dims = p%shape()
+  296.                                nx = dims(1) - 2 * p%num_halo()
+  297.    I                           ny = dims(2) - 2 * p%num_halo()
+  298.                                nz = dims(3)
+  299.                        
+  300.                                ! compute sizes of buffers
+  301.                                tb_size = nz * num_halo * nx
+  302.                                lr_size = nz * num_halo * (ny + 2 * num_halo)
+  303.                        
+  304.                                ! this is only done the first time this subroutine is called (warmup)
+  305.                                ! or when the dimensions of the fields change
+  306.                                if ( allocated(sndbuf_l) .and. &
+  307.                                    ( ( size(sndbuf_l) /= lr_size ) .or. ( size(sndbuf_t) /= tb_size ) ) ) then
+  308.                                    deallocate( sndbuf_l, sndbuf_r, sndbuf_t, sndbuf_b )
+  309.                                    deallocate( rcvbuf_l, rcvbuf_r, rcvbuf_t, rcvbuf_b )
+  310.                                end if
+  311.                                if ( .not. allocated(sndbuf_l) ) then
+  312.                                    allocate( sndbuf_l(lr_size), sndbuf_r(lr_size), sndbuf_t(tb_size), sndbuf_b(tb_size) )
+  313.                                    allocate( rcvbuf_l(lr_size), rcvbuf_r(lr_size), rcvbuf_t(tb_size), rcvbuf_b(tb_size) )
+  314.    fA---------------<>             sndbuf_l = 0.0_wp; sndbuf_r = 0.0_wp; sndbuf_t = 0.0_wp; sndbuf_b = 0.0_wp
+  315.    f----------------<>             rcvbuf_l = 0.0_wp; rcvbuf_r = 0.0_wp; rcvbuf_t = 0.0_wp; rcvbuf_b = 0.0_wp
+  316.                                end if
+  317.                        
+  318.                                ! pre-post the receives
+  319.  +                             call MPI_Irecv(rcvbuf_b, tb_size, dtype, p%bottom(), 1000, p%comm(), tb_req(1), ierror)
+  320.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Irecv(bottom)', code=ierror)
+  321.  + I                           call MPI_Irecv(rcvbuf_t, tb_size, dtype, p%top(), 1001, p%comm(), tb_req(2), ierror)
+  322.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Irecv(top)', code=ierror)
+  323.  + I                           call MPI_Irecv(rcvbuf_l, lr_size, dtype, p%left(), 1002, p%comm(), lr_req(1), ierror)
+  324.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Irecv(left)', code=ierror)
+  325.  + I                           call MPI_Irecv(rcvbuf_r, lr_size, dtype, p%right(), 1003, p%comm(), lr_req(2), ierror)
+  326.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Irecv(right)', code=ierror)
+  327.                        
+  328.                                ! pack the tb-buffers (without corners)
+  329.                                icount = 0
+  330.  + 1-----------------<         do k = 1, nz
+  331.  + 1 2---------------<         do j = 1, num_halo
+  332.    1 2 Vcr2----------<         do i = 1 + num_halo, nx + num_halo
+  333.    1 2 Vcr2                        icount = icount + 1
+  334.    1 2 Vcr2                        sndbuf_t(icount) = field(i, j + ny, k)
+  335.    1 2 Vcr2                        sndbuf_b(icount) = field(i, j + num_halo, k)
+  336.    1 2 Vcr2---------->         end do
+  337.    1 2--------------->         end do
+  338.    1----------------->         end do
+  339.                        
+  340.                                ! send lr-buffers
+  341.  + I                           call MPI_Isend(sndbuf_t, tb_size, dtype, p%top(), 1000, p%comm(), tb_req(3), ierror)
+  342.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Isend(top)', code=ierror)
+  343.  + I                           call MPI_Isend(sndbuf_b, tb_size, dtype, p%bottom(), 1001, p%comm(), tb_req(4), ierror)
+  344.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Isend(bottom)', code=ierror)
+  345.                        
+  346.                                ! wait for lr-comm to finish
+  347.  +                             call MPI_Waitall(4, tb_req, status, ierror)
+  348.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Waitall(tb)', code=ierror)
+  349.                        
+  350.                                ! pack the lr-buffers (including corners)
+  351.                                icount = 0
+  352.  + 1-----------------<         do k = 1, nz
+  353.  + 1 2---------------<         do j = 1, ny + 2 * num_halo
+  354.    1 2 Vcr2----------<         do i = 1, num_halo
+  355.    1 2 Vcr2                        icount = icount + 1
+  356.    1 2 Vcr2                        sndbuf_r(icount) = field(i + nx, j, k)
+  357.    1 2 Vcr2                        sndbuf_l(icount) = field(i + num_halo, j, k)
+  358.    1 2 Vcr2---------->         end do
+  359.    1 2--------------->         end do
+  360.    1----------------->         end do
+  361.                        
+  362.  + I                           call MPI_Isend(sndbuf_r, lr_size, dtype, p%right(), 1002, p%comm(), lr_req(3), ierror)
+  363.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Isend(right)', code=ierror)
+  364.  + I                           call MPI_Isend(sndbuf_l, lr_size, dtype, p%left(), 1003, p%comm(), lr_req(4), ierror)
+  365.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Isend(left)', code=ierror)
+  366.                        
+  367.                                ! unpack the tb-buffers (without corners)
+  368.                                icount = 0
+  369.  + 1-----------------<         do k = 1, nz
+  370.  + 1 2---------------<         do j = 1, num_halo
+  371.    1 2 Vcr2----------<         do i = 1 + num_halo, nx + num_halo
+  372.    1 2 Vcr2                        icount = icount + 1
+  373.    1 2 Vcr2                        field(i, j, k) = rcvbuf_b(icount)
+  374.    1 2 Vcr2                        field(i, j + num_halo + ny, k) = rcvbuf_t(icount)
+  375.    1 2 Vcr2---------->         end do
+  376.    1 2--------------->         end do
+  377.    1----------------->         end do
+  378.                        
+  379.                                ! wait for tb-comm to finish
+  380.  +                             call MPI_Waitall(4, lr_req, status, ierror)
+  381.  +                             call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Waitall(lr)', code=ierror)
+  382.                        
+  383.                                ! unpack the lr-buffers (with corners)
+  384.                                icount = 0
+  385.  + 1-----------------<         do k = 1, nz
+  386.  + 1 2---------------<         do j = 1, ny + 2 * num_halo
+  387.    1 2 Vcr2----------<         do i = 1, num_halo
+  388.    1 2 Vcr2                        icount = icount + 1
+  389.    1 2 Vcr2                        field(i, j, k) = rcvbuf_l(icount)
+  390.    1 2 Vcr2                        field(i + num_halo + nx, j, k) = rcvbuf_r(icount)
+  391.    1 2 Vcr2---------->         end do
+  392.    1 2--------------->         end do
+  393.    1----------------->         end do
+  394.                        
+  395.                            end subroutine update_halo
+  396.                        
+  397.                        
+  398.                            ! initialize at program start
+  399.                            ! (init MPI, read command line arguments)
+  400.                            subroutine init()
+  401.                                use mpi, only : MPI_INIT
+  402.                                use m_utils, only : error
+  403.                                implicit none
+  404.                        
+  405.                                ! local
+  406.                                integer :: ierror
+  407.                        
+  408.                                ! initialize MPI environment
+  409.  +                             call MPI_INIT(ierror)
+  410.  +                             call error(ierror /= 0, 'Problem with MPI_INIT', code=ierror)
+  411.                        
+  412.  +                             call read_cmd_line_arguments()
+  413.                        
+  414.                            end subroutine init
+  415.                        
+  416.                        
+  417.                            ! setup everything before work
+  418.                            ! (init timers, allocate memory, initialize fields)
+  419.                            subroutine setup()
+  420.                                implicit none
+  421.                        
+  422.                                ! local
+  423.                                integer :: i, j, k
+  424.                        
+  425.                                allocate( in_field(global_nx + 2 * num_halo, global_ny + 2 * num_halo, global_nz) )
+  426.    AC---------------<>         in_field = 0.0_wp
+  427.  + 1-----------------<         do k = 1 + global_nz / 4, 3 * global_nz / 4
+  428.  + 1 2---------------<         do j = 1 + num_halo + global_ny / 4, num_halo + 3 * global_ny / 4
+  429.    1 2 A-------------<         do i = 1 + num_halo + global_nx / 4, num_halo + 3 * global_nx / 4
+  430.    1 2 A                           in_field(i, j, k) = 1.0_wp
+  431.    1 2 A------------->         end do
+  432.    1 2--------------->         end do
+  433.    1----------------->         end do
+  434.                        
+  435.                                allocate( out_field(global_nx + 2 * num_halo, global_ny + 2 * num_halo, global_nz) )
+  436.    AC---------------<>         out_field = in_field
+  437.                        
+  438.                            end subroutine setup
+  439.                        
+  440.                        
+  441.                            ! read and parse the command line arguments
+  442.                            ! (read values, convert type, ensure all required arguments are present,
+  443.                            !  ensure values are reasonable)
+  444.                            subroutine read_cmd_line_arguments()
+  445.                                use m_utils, only : error
+  446.                                implicit none
+  447.                        
+  448.                                ! local
+  449.                                integer iarg, num_arg
+  450.                                character(len=256) :: arg, arg_val
+  451.                        
+  452.                                ! setup defaults
+  453.                                global_nx = -1
+  454.                                global_ny = -1
+  455.                                global_nz = -1
+  456.                                num_iter = -1
+  457.                                scan = .false.
+  458.                        
+  459.                                num_arg = command_argument_count()
+  460.                                iarg = 1
+  461.  + 1-----------------<         do while ( iarg <= num_arg )
+  462.    1                               call get_command_argument(iarg, arg)
+  463.    1                               select case (arg)
+  464.    1                               case ("--nx")
+  465.  + 1                                   call error(iarg + 1 > num_arg, "Missing value for --nx argument")
+  466.    1                                   call get_command_argument(iarg + 1, arg_val)
+  467.  + 1                                   call error(arg_val(1:1) == "-", "Missing value for --nx argument")
+  468.    1                                   read(arg_val, *) global_nx
+  469.    1                                   iarg = iarg + 1
+  470.    1                               case ("--ny")
+  471.  + 1                                   call error(iarg + 1 > num_arg, "Missing value for --ny argument")
+  472.    1                                   call get_command_argument(iarg + 1, arg_val)
+  473.  + 1                                   call error(arg_val(1:1) == "-", "Missing value for --ny argument")
+  474.    1                                   read(arg_val, *) global_ny
+  475.    1                                   iarg = iarg + 1
+  476.    1                               case ("--nz")
+  477.  + 1                                   call error(iarg + 1 > num_arg, "Missing value for --nz argument")
+  478.    1                                   call get_command_argument(iarg + 1, arg_val)
+  479.  + 1                                   call error(arg_val(1:1) == "-", "Missing value for --nz argument")
+  480.    1                                   read(arg_val, *) global_nz
+  481.    1                                   iarg = iarg + 1
+  482.    1                               case ("--num_iter")
+  483.  + 1                                   call error(iarg + 1 > num_arg, "Missing value for --num_iter argument")
+  484.    1                                   call get_command_argument(iarg + 1, arg_val)
+  485.  + 1                                   call error(arg_val(1:1) == "-", "Missing value for --num_iter argument")
+  486.    1                                   read(arg_val, *) num_iter
+  487.    1                                   iarg = iarg + 1
+  488.    1                               case ("--scan")
+  489.    1                                   scan = .true.
+  490.    1                               case default
+  491.  + 1                                   call error(.true., "Unknown command line argument encountered: " // trim(arg))
+  492.    1                               end select
+  493.    1                               iarg = iarg + 1
+  494.    1----------------->         end do
+  495.                        
+  496.                                ! make sure everything is set
+  497.                                if (.not. scan) then
+  498.  +                                 call error(global_nx == -1, 'You have to specify nx')
+  499.  +                                 call error(global_ny == -1, 'You have to specify ny')
+  500.                                end if
+  501.  +                             call error(global_nz == -1, 'You have to specify nz')
+  502.  +                             call error(num_iter == -1, 'You have to specify num_iter')
+  503.                        
+  504.                                ! check consistency of values
+  505.                                if (.not. scan) then
+  506.  +                                 call error(global_nx < 0 .or. global_nx > 1024*1024, "Please provide a reasonable value of nx")
+  507.  +                                 call error(global_ny < 0 .or. global_ny > 1024*1024, "Please provide a reasonable value of ny")
+  508.                                end if
+  509.  +                             call error(global_nz < 0 .or. global_nz > 1024, "Please provide a reasonable value of nz")
+  510.  +                             call error(num_iter < 1 .or. num_iter > 1024*1024, "Please provide a reasonable value of num_iter")
+  511.                        
+  512.                            end subroutine read_cmd_line_arguments
+  513.                        
+  514.                        
+  515.                            ! cleanup at end of work
+  516.                            ! (report timers, free memory)
+  517.                            subroutine cleanup()
+  518.                                implicit none
+  519.                        
+  520.                                deallocate(in_field, out_field)
+  521.                        
+  522.                            end subroutine cleanup
+  523.                        
+  524.                        
+  525.                            ! finalize at end of program
+  526.                            ! (finalize MPI)
+  527.                            subroutine finalize()
+  528.                                use mpi, only : MPI_FINALIZE
+  529.                                use m_utils, only : error
+  530.                                implicit none
+  531.                        
+  532.                                integer :: ierror
+  533.                        
+  534.  +                             call MPI_FINALIZE(ierror)
+  535.  +                             call error(ierror /= 0, 'Problem with MPI_FINALIZE', code=ierror)
+  536.                        
+  537.                            end subroutine finalize
+  538.                        
+  539.                        
+  540.                        end program main
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 13, Column = 9 
+  The call to tiny leaf routine "num_halo" was textually inlined.
+
+ftn-3001 ftn: IPA APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 13, Column = 9 
+  The call to tiny leaf routine "num_halo" was textually inlined.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 13, Column = 9 
+  "right" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 13, Column = 9 
+  "top" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 13, Column = 9 
+  "bottom" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 13, Column = 9 
+  "left" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 13, Column = 9 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-6823 ftn: THREAD MAIN, File = stencil2d-mpiomp.F90, Line = 43 
+  A region starting at line 43 and ending at line 47 was multi-threaded.
+
+ftn-3021 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 50, Column = 10 
+  "pat_record_i4" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 53, Column = 10 
+  "init" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 55, Column = 10 
+  "is_master" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6288 ftn: VECTOR MAIN, File = stencil2d-mpiomp.F90, Line = 61 
+  A loop starting at line 61 was not vectorized because it contains a call to subroutine "timer_init" on line 63.
+
+ftn-3163 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 63, Column = 14 
+  "timer_init" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 70, Column = 14 
+  "is_master" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3172 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 71, Column = 18 
+  "setup" was not inlined because the enclosing loop body did not completely flatten.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 73, Column = 31 
+  "is_master" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 74, Column = 18 
+  "write_3d_float32_field_to_file" was not inlined because the call site will not flatten.  "_CLOSE" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 76, Column = 13 
+  "constructor" was not inlined because the call site will not flatten.  "mpi_barrier_" is missing.
+
+ftn-6066 ftn: SCALAR MAIN, File = stencil2d-mpiomp.F90, Line = 78 
+   A loop nest at line 78 collapsed to a single loop.
+
+ftn-6202 ftn: VECTOR MAIN, File = stencil2d-mpiomp.F90, Line = 78 
+  A loop starting at line 78 was replaced by a library call.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 78, Column = 17 
+  "scatter_f32" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 82, Column = 14 
+  "apply_diffusion" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 86, Column = 14 
+  "pat_record_i4" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 89, Column = 14 
+  "timer_start" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 91, Column = 14 
+  "apply_diffusion" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 93, Column = 14 
+  "timer_end" was not inlined because the call site will not flatten.  "mpi_wtime_" is missing.
+
+ftn-3021 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 95, Column = 14 
+  "pat_record_i4" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 98, Column = 14 
+  "update_halo" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6066 ftn: SCALAR MAIN, File = stencil2d-mpiomp.F90, Line = 100 
+   A loop nest at line 100 collapsed to a single loop.
+
+ftn-6202 ftn: VECTOR MAIN, File = stencil2d-mpiomp.F90, Line = 100 
+  A loop starting at line 100 was replaced by a library call.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 100, Column = 22 
+  "gather_f32" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 102, Column = 31 
+  "is_master" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 103, Column = 18 
+  "write_3d_float32_field_to_file" was not inlined because the call site will not flatten.  "_CLOSE" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 105, Column = 14 
+  "is_master" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3001 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 106, Column = 18 
+  The call to tiny leaf routine "cleanup" was textually inlined.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 108, Column = 19 
+  "timer_get" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 109, Column = 14 
+  "is_master" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 111, Column = 22 
+  "num_rank" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 116, Column = 10 
+  "is_master" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA MAIN, File = stencil2d-mpiomp.F90, Line = 120, Column = 10 
+  "finalize" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6271 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 149 
+  A loop starting at line 149 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 149 
+  A loop starting at line 149 was unwound.
+
+ftn-3001 ftn: IPA APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 149, Column = 17 
+  The call to tiny leaf routine "shape_f" was textually inlined.
+
+ftn-3001 ftn: IPA APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 151, Column = 29 
+  The call to tiny leaf routine "num_halo" was textually inlined.
+
+ftn-6334 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 156 
+  A loop starting at line 156 was not vectorized because it contains multiple potential exits.
+
+ftn-6066 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 163 
+   A loop nest at line 163 collapsed to a single loop.
+
+ftn-6202 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 163 
+  A loop starting at line 163 was replaced by a library call.
+
+ftn-6288 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 167 
+  A loop starting at line 167 was not vectorized because it contains a call to subroutine "update_halo" on line 169.
+
+ftn-3118 ftn: IPA APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 169, Column = 18 
+  "update_halo" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6823 ftn: THREAD APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 172 
+  A region starting at line 172 and ending at line 199 was multi-threaded.
+
+ftn-6315 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 173 
+  A loop starting at line 173 was not vectorized because the target array (tmp1_field) would require rank expansion.
+
+ftn-6817 ftn: THREAD APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 173 
+  A loop starting at line 173 was partitioned.
+
+ftn-6294 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 174 
+  A loop starting at line 174 was not vectorized because a better candidate was found at line 175.
+
+ftn-6075 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 174 
+  A loop starting at line 174 participated in blocking, but was not itself blocked.
+
+ftn-6049 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 175 
+  A loop starting at line 175 was blocked with block size 1024.
+
+ftn-6005 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 175 
+  A loop starting at line 175 was unrolled 2 times.
+
+ftn-6204 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 175 
+  A loop starting at line 175 was vectorized.
+
+ftn-6294 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 182 
+  A loop starting at line 182 was not vectorized because a better candidate was found at line 183.
+
+ftn-6075 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 182 
+  A loop starting at line 182 participated in blocking, but was not itself blocked.
+
+ftn-6049 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 183 
+  A loop starting at line 183 was blocked with block size 512.
+
+ftn-6005 ftn: SCALAR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 183 
+  A loop starting at line 183 was unrolled 2 times.
+
+ftn-6217 ftn: VECTOR APPLY_DIFFUSION, File = stencil2d-mpiomp.F90, Line = 183 
+  A loop starting at line 183 was partially and conditionally vectorized.
+
+ftn-6271 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 295 
+  A loop starting at line 295 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 295 
+  A loop starting at line 295 was unwound.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 295, Column = 17 
+  The call to tiny leaf routine "shape_f" was textually inlined.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 297, Column = 29 
+  The call to tiny leaf routine "num_halo" was textually inlined.
+
+ftn-6230 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 314 
+  A loop starting at line 314 was replaced with multiple library calls.
+
+ftn-6230 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 314 
+  A loop starting at line 314 was replaced with multiple library calls.
+
+ftn-6004 ftn: SCALAR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 315 
+  A loop starting at line 315 was fused with the loop starting at line 314.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 319, Column = 14 
+  "mpi_irecv" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 320, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 321, Column = 14 
+  "mpi_irecv" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 321, Column = 66 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 322, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 323, Column = 14 
+  "mpi_irecv" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 323, Column = 67 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 324, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 325, Column = 14 
+  "mpi_irecv" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 325, Column = 68 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 326, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 330 
+  A loop starting at line 330 was not vectorized because a better candidate was found at line 332.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 331 
+  A loop starting at line 331 was not vectorized because a better candidate was found at line 332.
+
+ftn-6005 ftn: SCALAR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 332 
+  A loop starting at line 332 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 332 
+  A loop starting at line 332 was conditionally vectorized.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 341, Column = 14 
+  "mpi_isend" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 341, Column = 51 
+  "top" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 341, Column = 66 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 342, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 343, Column = 14 
+  "mpi_isend" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 343, Column = 51 
+  "bottom" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 343, Column = 69 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 344, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 347, Column = 14 
+  "mpi_waitall" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 348, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 352 
+  A loop starting at line 352 was not vectorized because a better candidate was found at line 354.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 353 
+  A loop starting at line 353 was not vectorized because a better candidate was found at line 354.
+
+ftn-6005 ftn: SCALAR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 354 
+  A loop starting at line 354 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 354 
+  A loop starting at line 354 was conditionally vectorized.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 362, Column = 14 
+  "mpi_isend" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 362, Column = 51 
+  "right" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 362, Column = 68 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 363, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 364, Column = 14 
+  "mpi_isend" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 364, Column = 51 
+  "left" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3001 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 364, Column = 67 
+  The call to tiny leaf routine "comm" was textually inlined.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 365, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 369 
+  A loop starting at line 369 was not vectorized because a better candidate was found at line 371.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 370 
+  A loop starting at line 370 was not vectorized because a better candidate was found at line 371.
+
+ftn-6005 ftn: SCALAR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 371 
+  A loop starting at line 371 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 371 
+  A loop starting at line 371 was conditionally vectorized.
+
+ftn-3021 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 380, Column = 14 
+  "mpi_waitall" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 381, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 385 
+  A loop starting at line 385 was not vectorized because a better candidate was found at line 387.
+
+ftn-6294 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 386 
+  A loop starting at line 386 was not vectorized because a better candidate was found at line 387.
+
+ftn-6005 ftn: SCALAR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 387 
+  A loop starting at line 387 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR UPDATE_HALO, File = stencil2d-mpiomp.F90, Line = 387 
+  A loop starting at line 387 was conditionally vectorized.
+
+ftn-3021 ftn: IPA INIT, File = stencil2d-mpiomp.F90, Line = 409, Column = 14 
+  "mpi_init" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA INIT, File = stencil2d-mpiomp.F90, Line = 410, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA INIT, File = stencil2d-mpiomp.F90, Line = 412, Column = 14 
+  "read_cmd_line_arguments" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6066 ftn: SCALAR SETUP, File = stencil2d-mpiomp.F90, Line = 426 
+   A loop nest at line 426 collapsed to a single loop.
+
+ftn-6202 ftn: VECTOR SETUP, File = stencil2d-mpiomp.F90, Line = 426 
+  A loop starting at line 426 was replaced by a library call.
+
+ftn-6294 ftn: VECTOR SETUP, File = stencil2d-mpiomp.F90, Line = 427 
+  A loop starting at line 427 was not vectorized because a better candidate was found at line 429.
+
+ftn-6294 ftn: VECTOR SETUP, File = stencil2d-mpiomp.F90, Line = 428 
+  A loop starting at line 428 was not vectorized because a better candidate was found at line 429.
+
+ftn-6202 ftn: VECTOR SETUP, File = stencil2d-mpiomp.F90, Line = 429 
+  A loop starting at line 429 was replaced by a library call.
+
+ftn-6066 ftn: SCALAR SETUP, File = stencil2d-mpiomp.F90, Line = 436 
+   A loop nest at line 436 collapsed to a single loop.
+
+ftn-6202 ftn: VECTOR SETUP, File = stencil2d-mpiomp.F90, Line = 436 
+  A loop starting at line 436 was replaced by a library call.
+
+ftn-6262 ftn: VECTOR READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 461 
+  A loop starting at line 461 was not vectorized because it contains a call to a subroutine or function on line 462.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 465, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 467, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 471, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 473, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 477, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 479, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 483, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 485, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 491, Column = 22 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 498, Column = 18 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 499, Column = 18 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 501, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 502, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 506, Column = 18 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 507, Column = 18 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 509, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA READ_CMD_LINE_ARGUMENTS, File = stencil2d-mpiomp.F90, Line = 510, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA FINALIZE, File = stencil2d-mpiomp.F90, Line = 534, Column = 14 
+  "mpi_finalize" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA FINALIZE, File = stencil2d-mpiomp.F90, Line = 535, Column = 14 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

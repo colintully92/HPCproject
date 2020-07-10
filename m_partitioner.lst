@@ -1,0 +1,1172 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                          S u m m a r y   R e p o r t
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Compilation
+-----------
+File     : /users/course40/Project/m_partitioner.F90
+Compiled : 07/09/20  18:11:29
+Compiler : Version 9.0.2
+Ftnlx    : Version 9.0.2 
+Target   : x86-64
+Command  : ftn_driver.exe -hcpu=haswell -hdynamic -D__CRAYXC -D__CRAY_HASWELL
+           -D__CRAYXT_COMPUTE_LINUX_TARGET -hnetwork=aries
+           -I/opt/cray/pe/perftools/7.1.1/include -DCRAYPAT -hpat_trace
+           -homp_trace -O3 -hfp3 -eZ -ffree -N255 -ec -eC -eI -eF -rm -homp
+           -c m_partitioner.F90
+           -I/opt/cray/pe/cce/9.0.2/cce-clang/x86_64/lib/clang/9.0.0/include
+           -I/opt/cray/pe/cce/9.0.2/cce/x86_64/include/craylibs -I/usr/include
+           -I/usr/include -I/opt/cray/pe/libsci/19.06.1/CRAY/9.0/x86_64/include
+           -I/opt/cray/pe/mpt/7.7.10/gni/mpich-cray/9.0/include
+           -I/opt/nvidia/cudatoolkit10/10.1.105_3.27-7.0.1.1_4.1__ga311ce7/inclu
+           de
+           -I/opt/nvidia/cudatoolkit10/10.1.105_3.27-7.0.1.1_4.1__ga311ce7/extra
+           s/CUPTI/include
+           -I/opt/nvidia/cudatoolkit10/10.1.105_3.27-7.0.1.1_4.1__ga311ce7/nvvm/
+           include -I/opt/cray/rca/2.2.20-7.0.1.1_4.9__g8e3fb5b.ari/include
+           -I/opt/cray/pe/pmi/5.0.14/include
+           -I/opt/cray/xpmem/2.2.19-7.0.1.1_3.7__gdcf436c.ari/include
+           -I/opt/cray/dmapp/7.1.1-7.0.1.1_4.8__g38cf134.ari/include
+           -I/opt/cray/alps/6.6.56-7.0.1.1_4.10__g2e60a7e4.ari/include
+           -I/opt/cray/wlm_detect/1.3.3-7.0.1.1_4.6__g7109084.ari/include
+           -I/opt/cray/ugni/6.0.14.0-7.0.1.1_7.10__ge78e5b0.ari/include
+           -I/opt/cray/gni-headers/5.0.12.0-7.0.1.1_6.7__g3b1768f.ari/include
+           -I/opt/cray/alps/6.6.56-7.0.1.1_4.10__g2e60a7e4.ari/include
+           -I/opt/cray/krca/2.2.6-7.0.1.1_5.8__gb641b12.ari/include
+           -I/opt/cray-hss-devel/9.0.0/include
+           -I/opt/cray/udreg/2.3.2-7.0.1.1_3.9__g8175d3d.ari/include
+Program
+  Units  : M_PARTITIONER
+
+ftnlx report
+------------
+Source   : /users/course40/Project/m_partitioner.F90
+Date     : 07/09/2020  18:11:31
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                          S o u r c e   L i s t i n g
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+     %%%    L o o p m a r k   L e g e n d    %%%
+
+     Primary Loop Type        Modifiers
+     ------- ---- ----        ---------
+     A - Pattern matched      a - atomic memory operation
+                              b - blocked
+     C - Collapsed            c - conditional and/or computed
+     D - Deleted               
+     E - Cloned                
+     F - Flat - No calls      f - fused
+     G - Accelerated          g - partitioned
+     I - Inlined              i - interchanged
+     M - Multithreaded        m - partitioned
+                              n - non-blocking remote transfer
+                              p - partial
+     R - Rerolling            r - unrolled
+                              s - shortloop
+     V - Vectorized           w - unwound
+
+     + - More messages listed at end of listing
+     ------------------------------------------
+
+
+    1.                  !> @brief Partitioner class
+    2.                  !>
+    3.                  !> Ported from partioner.py
+    4.                  !>
+    5.                  !> @author Michal Sudwoj
+    6.                  !> @author Oliver Fuhrer
+    7.                  !> @date 2020-06-15
+    8.                  module m_partitioner
+    9.                    use, intrinsic :: iso_fortran_env, only: REAL32, REAL64, error_unit
+   10.                    use mpi, only: &
+   11.                      MPI_FLOAT, MPI_DOUBLE, MPI_SUCCESS, &
+   12.                      MPI_Comm_Rank, MPI_Comm_Size, MPI_Barrier
+   13.                      ! MPI_Scatter, MPI_Gather, MPI_Allgather
+   14.                      ! see https://github.com/pmodels/mpich/issues/3568
+   15.                    use m_utils, only: error
+   16.                  
+   17.                    implicit none
+   18.                    private
+   19.                  
+   20.                    logical, parameter :: debug = .false.
+   21.                  
+   22.                    !> @brief 2-dimensional domain decomposition of a 3-dimensional computational grid among MPI ranks on a communicator.
+   23.                    type, public :: Partitioner
+   24.                      private
+   25.                  
+   26.                      integer              :: comm_
+   27.                      integer              :: rank_
+   28.                      integer              :: num_ranks_
+   29.                      integer              :: num_halo_
+   30.                      integer              :: size_(2)
+   31.                      integer, allocatable :: domains_(:, :)
+   32.                      integer, allocatable :: shapes_(:, :)
+   33.                      integer              :: domain_(4)
+   34.                      integer              :: shape_(3)
+   35.                      integer              :: max_shape_(3)
+   36.                      logical              :: periodic_(2)
+   37.                      integer              :: global_shape_(3)
+   38.                    contains
+   39.                      procedure, public :: comm
+   40.                      procedure, public :: num_halo
+   41.                      procedure, public :: periodic
+   42.                      procedure, public :: rank
+   43.                      procedure, public :: num_ranks
+   44.                      procedure, public :: shape => shape_f
+   45.                      procedure, public :: global_shape
+   46.                      procedure, public :: size => size_f
+   47.                      procedure, public :: position
+   48.                      procedure, public :: left
+   49.                      procedure, public :: right
+   50.                      procedure, public :: top
+   51.                      procedure, public :: bottom
+   52.                      generic,   public :: scatter => scatter_f32, scatter_f64
+   53.                      generic,   public :: gather => gather_f32, gather_f64
+   54.                      procedure, public :: compute_domain
+   55.                  
+   56.                      procedure         :: scatter_f32
+   57.                      procedure         :: scatter_f64
+   58.                      procedure         :: gather_f32
+   59.                      procedure         :: gather_f64
+   60.                      procedure         :: setup_grid
+   61.                      procedure         :: get_neighbor_rank
+   62.                      procedure, nopass :: cyclic_offset
+   63.                      procedure         :: setup_domain
+   64.                      procedure, nopass :: distribute_to_bins
+   65.                      procedure, nopass :: cumsum
+   66.                      procedure, nopass :: find_max_shape
+   67.                      procedure         :: rank_to_position
+   68.                      procedure         :: position_to_rank
+   69.                    end type Partitioner
+   70.                  
+   71.                    interface Partitioner
+   72.                      module procedure constructor
+   73.                    end interface
+   74.                  
+   75.                  contains
+   76.                  
+   77.                    type(Partitioner) function constructor(comm, domain, num_halo, periodic) result(this)
+   78.                      integer, intent(in) :: comm
+   79.                      integer, intent(in) :: domain(3)
+   80.                      integer, intent(in) :: num_halo
+   81.                      logical, intent(in), optional :: periodic(2)
+   82.                  
+   83.                      integer :: ierror
+   84.                      logical :: periodic_(2)
+   85.                      integer :: rank
+   86.                  
+   87.                      if (present(periodic)) then
+   88.  + w----------<>       periodic_ = periodic
+   89.                      else
+   90.  + w----------<>       periodic_ = [.true., .true.]
+   91.                      end if
+   92.                  
+   93.  +                   call error(.not. (domain(1) > 0 .and. domain(2) > 0 .and. domain(3) > 0), 'Invalid domain specification (negative size)')
+   94.  +                   call error(.not. (num_halo >= 0), 'Number of halo points must be zero or positive')
+   95.                  
+   96.                      this%comm_ = comm
+   97.                      this%num_halo_ = num_halo
+   98.  + w----------<>     this%periodic_ = periodic_
+   99.                  
+  100.  +                   call MPI_Comm_Rank(this%comm_, this%rank_, ierror)
+  101.  +                   call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Comm_Rank', code = ierror)
+  102.                  
+  103.  +                   call MPI_Comm_Size(this%comm_, this%num_ranks_, ierror)
+  104.  +                   call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Comm_Size', code = ierror)
+  105.                  
+  106.                      this%global_shape_(1) = domain(1) + 2 * num_halo
+  107.                      this%global_shape_(2) = domain(2) + 2 * num_halo
+  108.                      this%global_shape_(3) = domain(3)
+  109.                  
+  110.  +                   call this%setup_grid()
+  111.  +                   call this%setup_domain(domain, num_halo)
+  112.                  
+  113.                      if (debug) then
+  114.  +                     call MPI_Barrier(this%comm_, ierror)
+  115.                  
+  116.                        if (this%rank_ == 0) then
+  117.                          write(error_unit, '(a33, /, a30, 3(i6), /, a30, 1(i6), /, a30, 2(l6))') &
+  118.                            '====== Global information =======', &
+  119.                            'Domain size (nx,ny,nz): ', this%global_shape_ - [2 * num_halo, 2 * num_halo, 0], &
+  120.                            'Halo width: ', this%num_halo_, &
+  121.                            'Periodicity (x,y): ', this%periodic_
+  122.                        end if
+  123.  +                     call flush(error_unit)
+  124.  +                     call MPI_Barrier(this%comm_, ierror)
+  125.                  
+  126.    D-----------<       do rank = 0, this%num_ranks_ - 1
+  127.    D                     if (this%rank_ == rank) then
+  128.  + D                       call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Barrier', code = ierror)
+  129.    D                       write(error_unit, '(a12, i13, a8, /, a30, 2(i6), /, a30, 3(i6), /, a30, 4(i6), / a30, 4(i6))') &
+  130.    D                       '====== Rank ', rank, ' =======', &
+  131.  + D                       'Position (x,y): ', this%position(), &
+  132.    D I                     'Subdomain size (nx,ny,nz): ', this%shape() - [2 * num_halo, 2 * num_halo, 0], &
+  133.  + D                       'Position on global grid: ', this%compute_domain(), &
+  134.    D                       'Neighbors (trbl): ', this%top(), this%right(), this%bottom(), this%left()
+  135.    D                     end if
+  136.  + D                     call flush(error_unit)
+  137.  + D                     call MPI_Barrier(this%comm_, ierror)
+  138.    D----------->       end do
+  139.                  
+  140.                        if (this%rank_ == 0) then
+  141.                          write(error_unit, '(a33)') '================================='
+  142.                        end if
+  143.  +                     call flush(error_unit)
+  144.  +                     call MPI_Barrier(this%comm_, ierror)
+  145.                      end if
+  146.                  
+  147.                  end function
+  148.                  
+  149.                    !> @brief Returns the MPI communicator used to setup the partioner
+  150.                    integer pure function comm(this)
+  151.                      class(Partitioner), intent(in) :: this
+  152.                  
+  153.                      comm = this%comm_
+  154.                    end function
+  155.                  
+  156.                    !> @brief Returns the number of halo points
+  157.                    integer pure function num_halo(this)
+  158.                      class(Partitioner), intent(in) :: this
+  159.                  
+  160.                      num_halo = this%num_halo_
+  161.                    end function
+  162.                  
+  163.                    !> @brief Returns the periodicity of all dimensions
+  164.                    pure function periodic(this)
+  165.                      class(Partitioner), intent(in) :: this
+  166.                      logical :: periodic(2)
+  167.                  
+  168.  + w----------<>     periodic = this%periodic_
+  169.                    end function
+  170.                  
+  171.                    !> @brief Returns the rank of the current MPI worker
+  172.                    integer pure function rank(this)
+  173.                      class(Partitioner), intent(in) :: this
+  174.                  
+  175.                      rank = this%rank_
+  176.                    end function
+  177.                  
+  178.                    !> @brief Returns the numer of ranks that have been distributed by this partitioner
+  179.                    integer pure function num_ranks(this)
+  180.                      class(Partitioner), intent(in) :: this
+  181.                  
+  182.                      num_ranks = this%num_ranks_
+  183.                    end function
+  184.                  
+  185.                    !> @brief Returns the shape of a local field (including halo points)
+  186.                    pure function shape_f(this)
+  187.                      class(Partitioner), intent(in) :: this
+  188.                      integer :: shape_f(3)
+  189.                  
+  190.  + w----------<>     shape_f = this%shape_
+  191.                    end function
+  192.                  
+  193.                    !> @brief Returns the shape of a global field (including halo points)
+  194.                    pure function global_shape(this)
+  195.                      class(Partitioner), intent(in) :: this
+  196.                      integer :: global_shape(3)
+  197.                  
+  198.  + w----------<>     global_shape = this%global_shape_
+  199.                    end function
+  200.                  
+  201.                    !> @brief Dimensions of the two-dimensional worker grid
+  202.                    pure function size_f(this) result(size)
+  203.                      class(Partitioner), intent(in) :: this
+  204.                      integer :: size(2)
+  205.                  
+  206.  + w----------<>     size = this%size_
+  207.                    end function
+  208.                  
+  209.                    !> @brief Position of the current rank on two-dimensional worker grid.
+  210.                    pure function position(this)
+  211.                      class(Partitioner), intent(in) :: this
+  212.                      integer :: position(2)
+  213.                  
+  214.  +                   position = this%rank_to_position(this%rank_)
+  215.                    end function
+  216.                  
+  217.                    !> @brief Returns the rank of the left neighbor
+  218.  +                 integer pure function left(this) result(rank)
+  219.                      class(Partitioner), intent(in) :: this
+  220.                      integer, parameter :: position(2) = [-1, 0]
+  221.                  
+  222.  +                   rank = this%get_neighbor_rank(position)
+  223.                    end function
+  224.                  
+  225.                    !> @brief Returns the rank of the right neighbor
+  226.  +                 integer pure function right(this) result(rank)
+  227.                      class(Partitioner), intent(in) :: this
+  228.                      integer, parameter :: position(2) = [+1, 0]
+  229.                  
+  230.  +                   rank = this%get_neighbor_rank(position)
+  231.                    end function
+  232.                  
+  233.                    !> @brief Returns the rank of the top neighbor
+  234.  +                 integer pure function top(this) result(rank)
+  235.                      class(Partitioner), intent(in) :: this
+  236.                      integer, parameter :: position(2) = [0, +1]
+  237.                  
+  238.  +                   rank = this%get_neighbor_rank(position)
+  239.                    end function
+  240.                  
+  241.                    !> @brief Returns the rank of the bottom neighbor
+  242.  +                 integer pure function bottom(this) result(rank)
+  243.                      class(Partitioner), intent(in) :: this
+  244.                      integer, parameter :: position(2) = [0, -1]
+  245.                  
+  246.  +                   rank = this%get_neighbor_rank(position)
+  247.                    end function
+  248.                  
+  249.                    !> @brief Scatter a global field from a root rank to the workers (f32)
+  250.                    function scatter_f32(this, field, root) result(r)
+  251.                      class(Partitioner), intent(in) :: this
+  252.                      real(REAL32), intent(in) :: field(:, :, :)
+  253.                      integer, optional :: root
+  254.                      real(REAL32), allocatable :: r(:, :, :)
+  255.                  
+  256.                      integer :: root_
+  257.                      real(REAL32), allocatable :: sendbuf(:, :, :, :)
+  258.                      integer :: rank
+  259.                      integer :: j_start
+  260.                      integer :: i_start
+  261.                      integer :: j_end
+  262.                      integer :: i_end
+  263.                      real(REAL32), allocatable :: recvbuf(:, :, :)
+  264.                      integer :: ierror
+  265.                  
+  266.                      if (present(root)) then
+  267.                        root_ = root
+  268.                      else
+  269.                        root_ = 0
+  270.                      end if
+  271.                  
+  272.                      if (this%rank_ == root_) then
+  273.  +                     call error(any(shape(field) /= this%global_shape_), 'Field does not have the correct shape')
+  274.                      end if
+  275.  +                   call error(.not. (0 <= root_ .and. root_ < this%num_ranks_), 'Root processor must be a valid rank')
+  276.                  
+  277.                      if (this%num_ranks_ == 1) then
+  278.    Vcr2-------<>       r = field
+  279.                        return
+  280.                      end if
+  281.                  
+  282.                      if (this%rank_ == root_) then
+  283.                        allocate(sendbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3), 0:this%num_ranks_ - 1))
+  284.                  
+  285.  + 1-----------<       do rank = 0, this%num_ranks_ - 1
+  286.    1                     i_start = this%domains_(rank, 1) + 1
+  287.    1                     j_start = this%domains_(rank, 2) + 1
+  288.    1                     i_end   = this%domains_(rank, 3)
+  289.    1                     j_end   = this%domains_(rank, 4)
+  290.    1             
+  291.    1 Vcr2-----<>         sendbuf(:i_end - i_start + 1, :j_end - j_start + 1, :, rank) = field(i_start:i_end, j_start:j_end, :)
+  292.    1----------->       end do
+  293.                      else
+  294.                        allocate(sendbuf(0, 0, 0, 0))
+  295.                      end if
+  296.                  
+  297.                      allocate(recvbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3)))
+  298.  +                   call MPI_Scatter( &
+  299.                        sendbuf, size(recvbuf), MPI_FLOAT, &
+  300.                        recvbuf, size(recvbuf), MPI_FLOAT, &
+  301.                        root_, this%comm_, ierror &
+  302.                      )
+  303.  +                   call error(ierror /= 0, 'Problem with MPI_Scatter', code = ierror)
+  304.                  
+  305.                      i_start = this%domain_(1)
+  306.                      j_start = this%domain_(2)
+  307.                      i_end   = this%domain_(3)
+  308.                      j_end   = this%domain_(4)
+  309.                  
+  310.    A----------<>     r = recvbuf(:i_end - i_start + 1, :j_end - j_start + 1, :)
+  311.                    end function
+  312.                  
+  313.                    !> @brief Scatter a global field from a root rank to the workers (f64)
+  314.                    function scatter_f64(this, field, root) result(r)
+  315.                      class(Partitioner), intent(in) :: this
+  316.                      real(REAL64), intent(in) :: field(:, :, :)
+  317.                      integer, optional :: root
+  318.                      real(REAL64), allocatable :: r(:, :, :)
+  319.                  
+  320.                      integer :: root_
+  321.                      real(REAL64), allocatable :: sendbuf(:, :, :, :)
+  322.                      integer :: rank
+  323.                      integer :: j_start
+  324.                      integer :: i_start
+  325.                      integer :: j_end
+  326.                      integer :: i_end
+  327.                      real(REAL64), allocatable :: recvbuf(:, :, :)
+  328.                      integer :: ierror
+  329.                  
+  330.                      if (present(root)) then
+  331.                        root_ = root
+  332.                      else
+  333.                        root_ = 0
+  334.                      end if
+  335.                  
+  336.                      if (this%rank_ == root_) then
+  337.  +                     call error(any(shape(field) /= this%global_shape_), 'Field does not have the correct shape')
+  338.                      end if
+  339.  +                   call error(.not. (0 <= root_ .and. root_ < this%num_ranks_), 'Root processor must be a valid rank')
+  340.                  
+  341.                      if (this%num_ranks_ == 1) then
+  342.    Vcr2-------<>       r = field
+  343.                        return
+  344.                      end if
+  345.                  
+  346.                      if (this%rank_ == root_) then
+  347.                        allocate(sendbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3), 0:this%num_ranks_ - 1))
+  348.                  
+  349.  + 1-----------<       do rank = 0, this%num_ranks_ - 1
+  350.    1                     i_start = this%domains_(rank, 1) + 1
+  351.    1                     j_start = this%domains_(rank, 2) + 1
+  352.    1                     i_end   = this%domains_(rank, 3)
+  353.    1                     j_end   = this%domains_(rank, 4)
+  354.    1             
+  355.    1 Vcr2-----<>         sendbuf(:i_end - i_start + 1, :j_end - j_start + 1, :, rank) = field(i_start:i_end, j_start:j_end, :)
+  356.    1----------->       end do
+  357.                      else
+  358.                        allocate(sendbuf(0, 0, 0, 0))
+  359.                      end if
+  360.                  
+  361.                      allocate(recvbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3)))
+  362.  +                   call MPI_Scatter( &
+  363.                        sendbuf, size(recvbuf), MPI_DOUBLE, &
+  364.                        recvbuf, size(recvbuf), MPI_DOUBLE, &
+  365.                        root_, this%comm_, ierror &
+  366.                      )
+  367.  +                   call error(ierror /= 0, 'Problem with MPI_Scatter', code = ierror)
+  368.                  
+  369.                      i_start = this%domain_(1)
+  370.                      j_start = this%domain_(2)
+  371.                      i_end   = this%domain_(3)
+  372.                      j_end   = this%domain_(4)
+  373.                  
+  374.    A----------<>     r = recvbuf(:i_end - i_start + 1, :j_end - j_start + 1, :)
+  375.                    end function
+  376.                  
+  377.                    !> @brief Gather a distributed field from workers to a single global field on a root rank (f32)
+  378.                    function gather_f32(this, field, root) result(r)
+  379.                      class(Partitioner), intent(in) :: this
+  380.                      real(REAL32), intent(in) :: field(:, :, :)
+  381.                      integer, optional :: root
+  382.                      real(REAL32), allocatable :: r(:, :, :)
+  383.                  
+  384.                      integer :: root_
+  385.                      integer :: j_start
+  386.                      integer :: i_start
+  387.                      integer :: j_end
+  388.                      integer :: i_end
+  389.                      real(REAL32), allocatable :: sendbuf(:, :, :)
+  390.                      real(REAL32), allocatable :: recvbuf(:, :, :, :)
+  391.                      integer :: ierror
+  392.                      real(REAL32), allocatable :: global_field(:, :, :)
+  393.                      integer :: rank
+  394.                  
+  395.                      if (present(root)) then
+  396.                        root_ = root
+  397.                      else
+  398.                        root_ = 0
+  399.                      end if
+  400.                  
+  401.  +                   call error(any(shape(field) /= this%shape_), 'Field does not have the correct shape')
+  402.  +                   call error(.not. (-1 <= root_ .and. root_ < this%num_ranks_), 'Root processor must be -1 (all) or a valid rank')
+  403.                  
+  404.                      if (this%num_ranks_ == 1) then
+  405.    Vcr2-------<>       r = field
+  406.                        return
+  407.                      end if
+  408.                  
+  409.                      i_start = this%domain_(1)
+  410.                      j_start = this%domain_(2)
+  411.                      i_end   = this%domain_(3)
+  412.                      j_end   = this%domain_(4)
+  413.                  
+  414.                      allocate(sendbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3)))
+  415.    Vcr2-------<>     sendbuf(:i_end - i_start + 1, :j_end - j_start + 1, :) = field
+  416.                  
+  417.                      if (this%rank_ == root_ .or. root_ == -1) then
+  418.                        allocate(recvbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3), 0:this%num_ranks_ - 1))
+  419.                      else
+  420.                        allocate(recvbuf(0, 0, 0, 0))
+  421.                      end if
+  422.                  
+  423.                      if (root_ > -1) then
+  424.  +                     call MPI_Gather( &
+  425.                          sendbuf, size(sendbuf), MPI_FLOAT, &
+  426.                          recvbuf, size(sendbuf), MPI_FLOAT, &
+  427.                          root_, this%comm_, ierror &
+  428.                        )
+  429.  +                     call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Gather', code = ierror)
+  430.                      else
+  431.  +                     call MPI_Allgather( &
+  432.                          sendbuf, size(sendbuf), MPI_FLOAT, &
+  433.                          recvbuf, size(sendbuf), MPI_FLOAT, &
+  434.                          this%comm_, ierror &
+  435.                        )
+  436.  +                     call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Allgather', code = ierror)
+  437.                      end if
+  438.                  
+  439.                      if (this%rank_ == root_ .or. root_ == -1) then
+  440.                        allocate(global_field(this%global_shape_(1), this%global_shape_(2), this%global_shape_(3)))
+  441.  + 1-----------<       do rank = 0, this%num_ranks_ - 1
+  442.    1                     i_start = this%domains_(rank, 1) + 1
+  443.    1                     j_start = this%domains_(rank, 2) + 1
+  444.    1                     i_end   = this%domains_(rank, 3)
+  445.    1                     j_end   = this%domains_(rank, 4)
+  446.    1             
+  447.    1 A--------<>         global_field(i_start:i_end, j_start:j_end, :) = recvbuf(:i_end - i_start + 1, :j_end - j_start + 1, :, rank)
+  448.    1----------->       end do
+  449.                  
+  450.    AC---------<>       r = global_field
+  451.                      else
+  452.                        allocate(r(0, 0, 0))
+  453.                      end if
+  454.                    end function
+  455.                  
+  456.                    !> @brief Gather a distributed field from workers to a single global field on a root rank (f64)
+  457.                    function gather_f64(this, field, root) result(r)
+  458.                      class(Partitioner), intent(in) :: this
+  459.                      real(REAL64), intent(in) :: field(:, :, :)
+  460.                      integer, optional :: root
+  461.                      real(REAL64), allocatable :: r(:, :, :)
+  462.                  
+  463.                      integer :: root_
+  464.                      integer :: j_start
+  465.                      integer :: i_start
+  466.                      integer :: j_end
+  467.                      integer :: i_end
+  468.                      real(REAL64), allocatable :: sendbuf(:, :, :)
+  469.                      real(REAL64), allocatable :: recvbuf(:, :, :, :)
+  470.                      integer :: ierror
+  471.                      real(REAL64), allocatable :: global_field(:, :, :)
+  472.                      integer :: rank
+  473.                  
+  474.                      if (present(root)) then
+  475.                        root_ = root
+  476.                      else
+  477.                        root_ = 0
+  478.                      end if
+  479.                  
+  480.  +                   call error(any(shape(field) /= this%shape_), 'Field does not have the correct shape')
+  481.  +                   call error(.not. (-1 <= root_ .and. root_ < this%num_ranks_), 'Root processor must be -1 (all) or a valid rank')
+  482.                  
+  483.                      if (this%num_ranks_ == 1) then
+  484.    Vcr2-------<>       r = field
+  485.                        return
+  486.                      end if
+  487.                  
+  488.                      i_start = this%domain_(1)
+  489.                      j_start = this%domain_(2)
+  490.                      i_end   = this%domain_(3)
+  491.                      j_end   = this%domain_(4)
+  492.                  
+  493.                      allocate(sendbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3)))
+  494.    Vcr2-------<>     sendbuf(:i_end - i_start + 1, :j_end - j_start + 1, :) = field
+  495.                  
+  496.                      if (this%rank_ == root_ .or. root_ == -1) then
+  497.                        allocate(recvbuf(this%max_shape_(1), this%max_shape_(2), this%max_shape_(3), 0:this%num_ranks_ - 1))
+  498.                      else
+  499.                        allocate(recvbuf(0, 0, 0, 0))
+  500.                      end if
+  501.                  
+  502.                      if (root_ > -1) then
+  503.  +                     call MPI_Gather( &
+  504.                          sendbuf, size(sendbuf), MPI_DOUBLE, &
+  505.                          recvbuf, size(sendbuf), MPI_DOUBLE, &
+  506.                          root_, this%comm_, ierror &
+  507.                        )
+  508.  +                     call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Gather', code = ierror)
+  509.                      else
+  510.  +                     call MPI_Allgather( &
+  511.                          sendbuf, size(sendbuf), MPI_DOUBLE, &
+  512.                          recvbuf, size(sendbuf), MPI_DOUBLE, &
+  513.                          this%comm_, ierror &
+  514.                        )
+  515.  +                     call error(ierror /= MPI_SUCCESS, 'Problem with MPI_Allgather', code = ierror)
+  516.                      end if
+  517.                  
+  518.                      if (this%rank_ == root_ .or. root_ == -1) then
+  519.                        allocate(global_field(this%global_shape_(1), this%global_shape_(2), this%global_shape_(3)))
+  520.  + 1-----------<       do rank = 0, this%num_ranks_ - 1
+  521.    1                     i_start = this%domains_(rank, 1) + 1
+  522.    1                     j_start = this%domains_(rank, 2) + 1
+  523.    1                     i_end   = this%domains_(rank, 3)
+  524.    1                     j_end   = this%domains_(rank, 4)
+  525.    1             
+  526.    1 A--------<>         global_field(i_start:i_end, j_start:j_end, :) = recvbuf(:i_end - i_start + 1, :j_end - j_start + 1, :, rank)
+  527.    1----------->       end do
+  528.                  
+  529.    AC---------<>       r = global_field
+  530.                      else
+  531.                        allocate(r(0, 0, 0))
+  532.                      end if
+  533.                    end function
+  534.                  
+  535.                    !> @brief Return position of subdomain withoug halo on the global domain
+  536.                    pure function compute_domain(this) result(subdomain)
+  537.                      class(Partitioner), intent(in) :: this
+  538.                      integer :: subdomain(4)
+  539.                  
+  540.                      subdomain(1) = this%domain_(1) + this%num_halo_
+  541.                      subdomain(2) = this%domain_(2) + this%num_halo_
+  542.                      subdomain(3) = this%domain_(3) - this%num_halo_
+  543.                      subdomain(4) = this%domain_(4) - this%num_halo_
+  544.                    end function
+  545.                  
+  546.                    !> @brief Distribute ranks onto a Cartesion grid of workers
+  547.                    subroutine setup_grid(this)
+  548.                      class(Partitioner), intent(inout) :: this
+  549.                  
+  550.                      integer :: ranks_x
+  551.                  
+  552.  + 1-----------<     do ranks_x = floor(sqrt(1.0 * this%num_ranks_)), 1, -1
+  553.    1                   if (mod(this%num_ranks_, ranks_x) == 0) then
+  554.    1                     exit
+  555.    1                   end if
+  556.    1----------->     end do
+  557.                  
+  558.                      this%size_(1) = ranks_x
+  559.                      this%size_(2) = this%num_ranks_ / ranks_x
+  560.                    end subroutine
+  561.                  
+  562.                    !> @brief Get the rank ID of a neighboring rank at a certain offset relative to the current rank
+  563.                    integer pure function get_neighbor_rank(this, offset) result(rank)
+  564.                      class(Partitioner), intent(in) :: this
+  565.                      integer, intent(in) :: offset(2)
+  566.                  
+  567.                      integer :: pos(2)
+  568.                      integer :: pos_offset(2)
+  569.                  
+  570.  +                   pos = this%rank_to_position(this%rank_)
+  571.  +                   pos_offset(1) = this%cyclic_offset(pos(1), offset(1), this%size_(1), this%periodic_(1))
+  572.  +                   pos_offset(2) = this%cyclic_offset(pos(2), offset(2), this%size_(2), this%periodic_(2))
+  573.                  
+  574.  +                   rank = this%position_to_rank(pos_offset)
+  575.                    end function
+  576.                  
+  577.                    !> @brief Add offset with cyclic boundary conditions
+  578.                    integer pure function cyclic_offset(pos, offset, size, periodic) result(p)
+  579.                      integer, intent(in) :: pos
+  580.                      integer, intent(in) :: offset
+  581.                      integer, intent(in) :: size
+  582.                      logical, intent(in) :: periodic
+  583.                  
+  584.                      p = pos + offset
+  585.                      if (periodic) then
+  586.    D-----------<       do while (p < 1)
+  587.    D                     p = p + size
+  588.    D----------->       end do
+  589.    D-----------<       do while (p > size)
+  590.    D                     p = p - size
+  591.    D----------->       end do
+  592.                      end if
+  593.                  
+  594.                      if (p < 1 .or. p > size) then
+  595.                        p = -1
+  596.                      end if
+  597.                  
+  598.                    end function
+  599.                  
+  600.                    !> @brief Distribute the points of the computational grid onto the Cartesion grid of workers
+  601.                    subroutine setup_domain(this, shape, num_halo)
+  602.                      class(Partitioner), intent(inout) :: this
+  603.                      integer, intent(in) :: shape(3)
+  604.                      integer, intent(in) :: num_halo
+  605.                  
+  606.                      integer :: size_z
+  607.                      integer, allocatable :: size_y(:)
+  608.                      integer, allocatable :: size_x(:)
+  609.                      integer, allocatable :: pos_y(:)
+  610.                      integer, allocatable :: pos_x(:)
+  611.                      integer :: pos(2)
+  612.                      integer :: rank
+  613.                  
+  614.  + D----------<>     size_x = this%distribute_to_bins(shape(1), this%size_(1))
+  615.  + D----------<>     size_y = this%distribute_to_bins(shape(2), this%size_(2))
+  616.                      size_z = shape(3)
+  617.                  
+  618.  + D----------<>     pos_x = this%cumsum(size_x, 1 + num_halo)
+  619.  + D----------<>     pos_y = this%cumsum(size_y, 1 + num_halo)
+  620.                  
+  621.                      allocate(this%domains_(0:this%num_ranks_ - 1, 4))
+  622.                      allocate(this%shapes_(0:this%num_ranks_ - 1, 3))
+  623.                  
+  624.  + 1-----------<     do rank = 0, this%num_ranks_ - 1
+  625.  + 1                   pos = this%rank_to_position(rank)
+  626.    1                   this%domains_(rank, 1) = pos_x(pos(1)) - num_halo
+  627.    1                   this%domains_(rank, 2) = pos_y(pos(2)) - num_halo
+  628.    1                   this%domains_(rank, 3) = pos_x(pos(1) + 1) + num_halo - 1
+  629.    1                   this%domains_(rank, 4) = pos_y(pos(2) + 1) + num_halo - 1
+  630.    1             
+  631.    1                   this%shapes_(rank, 1) = this%domains_(rank, 3) - this%domains_(rank, 1) + 1
+  632.    1                   this%shapes_(rank, 2) = this%domains_(rank, 4) - this%domains_(rank, 2) + 1
+  633.    1                   this%shapes_(rank, 3) = size_z
+  634.    1----------->     end do
+  635.                  
+  636.    Vs---------<>     this%domain_ = this%domains_(this%rank_, :)
+  637.  + w----------<>     this%shape_  = this%shapes_(this%rank_, :)
+  638.                  
+  639.  + w----------<>     this%max_shape_ = this%find_max_shape(this%shapes_)
+  640.                    end subroutine
+  641.                  
+  642.                    !> @brief Distribute a number of elements to a number of bins
+  643.                    pure function distribute_to_bins(num, bins) result(bin_size)
+  644.                      integer, intent(in) :: num
+  645.                      integer, intent(in) :: bins
+  646.                      integer, allocatable :: bin_size(:)
+  647.                  
+  648.                      integer :: n
+  649.                      integer :: extend
+  650.                      integer :: start_extend
+  651.                  
+  652.                      n = num / bins
+  653.                      allocate(bin_size(bins))
+  654.    A----------<>     bin_size = n
+  655.                      extend = num - n * bins
+  656.                      if (extend > 0) then
+  657.                        start_extend = bins / 2 - extend / 2 + 1
+  658.    Vr2--------<>       bin_size(start_extend:start_extend + extend - 1) = bin_size(start_extend:start_extend + extend - 1) + 1
+  659.                      end if
+  660.                    end function
+  661.                  
+  662.                    !> @brief Cumulative sum with an optional initial value
+  663.                    pure function cumsum(array, initial_value)
+  664.                      integer, intent(in) :: array(:)
+  665.                      integer, intent(in), optional :: initial_value
+  666.                      integer, allocatable :: cumsum(:)
+  667.                  
+  668.                      integer :: n, i
+  669.                      integer :: initial_value_
+  670.                  
+  671.                      if (present(initial_value)) then
+  672.                        initial_value_ = initial_value
+  673.                      else
+  674.                        initial_value_ = 0
+  675.                      end if
+  676.                  
+  677.                      n = size(array)
+  678.                      allocate(cumsum(n + 1))
+  679.                      cumsum(1) = initial_value_
+  680.  + r4----------<     do i = 1, n
+  681.    r4                  cumsum(i + 1) = cumsum(i) + array(i)
+  682.    r4---------->     end do
+  683.                    end function
+  684.                  
+  685.                    !> @brief Find maximum dimensions of subdomains across all ranks
+  686.                    function find_max_shape(shapes) result(max_shape)
+  687.                      integer, intent(in) :: shapes(:, :)
+  688.                      integer :: max_shape(3)
+  689.                  
+  690.                      integer :: shape
+  691.                  
+  692.  +                   call error(size(shapes, 2) /= 3, 'Wrong shapes size')
+  693.                  
+  694.  + w----------<>     max_shape = shapes(1, :)
+  695.    Vcr2--------<     do shape = 2, size(shapes, 1)
+  696.    Vcr2                max_shape(1) = max(max_shape(1), shapes(shape, 1))
+  697.    Vcr2                max_shape(2) = max(max_shape(2), shapes(shape, 2))
+  698.    Vcr2                max_shape(3) = max(max_shape(3), shapes(shape, 3))
+  699.    Vcr2-------->     end do
+  700.                    end function
+  701.                  
+  702.                    !> @brief Find position of rank on worker grid
+  703.                    pure function rank_to_position(this, rank) result(pos)
+  704.                      class(Partitioner), intent(in) :: this
+  705.                      integer, intent(in) :: rank
+  706.                      integer :: pos(2)
+  707.                  
+  708.                      pos(1) = mod(rank, this%size_(1)) + 1
+  709.                      pos(2) = rank / this%size_(1) + 1
+  710.                    end function
+  711.                  
+  712.                    !> @brief Find rank given a position on the worker grid
+  713.                    integer pure function position_to_rank(this, pos) result(rank)
+  714.                      class(Partitioner), intent(in) :: this
+  715.                      integer, intent(in) :: pos(2)
+  716.                  
+  717.                      rank = (pos(2) - 1) * this%size_(1) + (pos(1) - 1)
+  718.                    end function
+  719.                  
+  720.                  end module m_partitioner
+
+ftn-6271 ftn: VECTOR CONSTRUCTOR, File = m_partitioner.F90, Line = 88 
+  A loop starting at line 88 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR CONSTRUCTOR, File = m_partitioner.F90, Line = 88 
+  A loop starting at line 88 was unwound.
+
+ftn-6271 ftn: VECTOR CONSTRUCTOR, File = m_partitioner.F90, Line = 90 
+  A loop starting at line 90 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR CONSTRUCTOR, File = m_partitioner.F90, Line = 90 
+  A loop starting at line 90 was unwound.
+
+ftn-3118 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 93, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 94, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6271 ftn: VECTOR CONSTRUCTOR, File = m_partitioner.F90, Line = 98 
+  A loop starting at line 98 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR CONSTRUCTOR, File = m_partitioner.F90, Line = 98 
+  A loop starting at line 98 was unwound.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 100, Column = 10 
+  "mpi_comm_rank" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 101, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 103, Column = 10 
+  "mpi_comm_size" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 104, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3171 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 110, Column = 14 
+  "setup_grid" was not inlined because it is not in the body of a loop.
+
+ftn-3118 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 111, Column = 14 
+  "setup_domain" was not inlined because the call site will not flatten.  "t$160" is missing.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 114, Column = 12 
+  "mpi_barrier" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 123, Column = 12 
+  "flush" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 124, Column = 12 
+  "mpi_barrier" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6002 ftn: SCALAR CONSTRUCTOR, File = m_partitioner.F90, Line = 126 
+  A loop starting at line 126 was eliminated by optimization.
+
+ftn-3118 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 128, Column = 16 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 131, Column = 35 
+  "position" was not inlined because the call site will not flatten.  "t$63" is missing.
+
+ftn-3001 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 132, Column = 46 
+  The call to tiny leaf routine "shape_f" was textually inlined.
+
+ftn-3172 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 133, Column = 44 
+  "compute_domain" was not inlined because the enclosing loop body did not completely flatten.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 136, Column = 14 
+  "flush" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 137, Column = 14 
+  "mpi_barrier" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 143, Column = 12 
+  "flush" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 144, Column = 12 
+  "mpi_barrier" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6271 ftn: VECTOR PERIODIC, File = m_partitioner.F90, Line = 168 
+  A loop starting at line 168 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR PERIODIC, File = m_partitioner.F90, Line = 168 
+  A loop starting at line 168 was unwound.
+
+ftn-6271 ftn: VECTOR SHAPE_F, File = m_partitioner.F90, Line = 190 
+  A loop starting at line 190 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR SHAPE_F, File = m_partitioner.F90, Line = 190 
+  A loop starting at line 190 was unwound.
+
+ftn-6271 ftn: VECTOR GLOBAL_SHAPE, File = m_partitioner.F90, Line = 198 
+  A loop starting at line 198 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR GLOBAL_SHAPE, File = m_partitioner.F90, Line = 198 
+  A loop starting at line 198 was unwound.
+
+ftn-6271 ftn: VECTOR SIZE_F, File = m_partitioner.F90, Line = 206 
+  A loop starting at line 206 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR SIZE_F, File = m_partitioner.F90, Line = 206 
+  A loop starting at line 206 was unwound.
+
+ftn-3021 ftn: IPA POSITION, File = m_partitioner.F90, Line = 214, Column = 16 
+  "t$63" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 218, Column = 43 
+  "left" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3021 ftn: IPA LEFT, File = m_partitioner.F90, Line = 222, Column = 12 
+  "t$65" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 226, Column = 44 
+  "right" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3021 ftn: IPA RIGHT, File = m_partitioner.F90, Line = 230, Column = 12 
+  "t$67" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 234, Column = 42 
+  "top" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3021 ftn: IPA TOP, File = m_partitioner.F90, Line = 238, Column = 12 
+  "t$69" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3163 ftn: IPA CONSTRUCTOR, File = m_partitioner.F90, Line = 242, Column = 45 
+  "bottom" was not inlined because the routine contains initialized data with the SAVE attribute.
+
+ftn-3021 ftn: IPA BOTTOM, File = m_partitioner.F90, Line = 246, Column = 12 
+  "t$71" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA SCATTER_F32, File = m_partitioner.F90, Line = 273, Column = 12 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA SCATTER_F32, File = m_partitioner.F90, Line = 275, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6005 ftn: SCALAR SCATTER_F32, File = m_partitioner.F90, Line = 278 
+  A loop starting at line 278 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR SCATTER_F32, File = m_partitioner.F90, Line = 278 
+  A loop starting at line 278 was conditionally vectorized.
+
+ftn-6306 ftn: VECTOR SCATTER_F32, File = m_partitioner.F90, Line = 285 
+  A loop starting at line 285 was not vectorized because the iteration space is too irregular.
+
+ftn-6005 ftn: SCALAR SCATTER_F32, File = m_partitioner.F90, Line = 291 
+  A loop starting at line 291 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR SCATTER_F32, File = m_partitioner.F90, Line = 291 
+  A loop starting at line 291 was conditionally vectorized.
+
+ftn-3021 ftn: IPA SCATTER_F32, File = m_partitioner.F90, Line = 298, Column = 10 
+  "mpi_scatter" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA SCATTER_F32, File = m_partitioner.F90, Line = 303, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6231 ftn: VECTOR SCATTER_F32, File = m_partitioner.F90, Line = 310 
+  A statement was replaced by a library call.
+
+ftn-3118 ftn: IPA SCATTER_F64, File = m_partitioner.F90, Line = 337, Column = 12 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA SCATTER_F64, File = m_partitioner.F90, Line = 339, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6005 ftn: SCALAR SCATTER_F64, File = m_partitioner.F90, Line = 342 
+  A loop starting at line 342 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR SCATTER_F64, File = m_partitioner.F90, Line = 342 
+  A loop starting at line 342 was conditionally vectorized.
+
+ftn-6306 ftn: VECTOR SCATTER_F64, File = m_partitioner.F90, Line = 349 
+  A loop starting at line 349 was not vectorized because the iteration space is too irregular.
+
+ftn-6005 ftn: SCALAR SCATTER_F64, File = m_partitioner.F90, Line = 355 
+  A loop starting at line 355 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR SCATTER_F64, File = m_partitioner.F90, Line = 355 
+  A loop starting at line 355 was conditionally vectorized.
+
+ftn-3021 ftn: IPA SCATTER_F64, File = m_partitioner.F90, Line = 362, Column = 10 
+  "mpi_scatter" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA SCATTER_F64, File = m_partitioner.F90, Line = 367, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6231 ftn: VECTOR SCATTER_F64, File = m_partitioner.F90, Line = 374 
+  A statement was replaced by a library call.
+
+ftn-3118 ftn: IPA GATHER_F32, File = m_partitioner.F90, Line = 401, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA GATHER_F32, File = m_partitioner.F90, Line = 402, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6005 ftn: SCALAR GATHER_F32, File = m_partitioner.F90, Line = 405 
+  A loop starting at line 405 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR GATHER_F32, File = m_partitioner.F90, Line = 405 
+  A loop starting at line 405 was conditionally vectorized.
+
+ftn-6005 ftn: SCALAR GATHER_F32, File = m_partitioner.F90, Line = 415 
+  A loop starting at line 415 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR GATHER_F32, File = m_partitioner.F90, Line = 415 
+  A loop starting at line 415 was conditionally vectorized.
+
+ftn-3021 ftn: IPA GATHER_F32, File = m_partitioner.F90, Line = 424, Column = 12 
+  "mpi_gather" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA GATHER_F32, File = m_partitioner.F90, Line = 429, Column = 12 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA GATHER_F32, File = m_partitioner.F90, Line = 431, Column = 12 
+  "mpi_allgather" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA GATHER_F32, File = m_partitioner.F90, Line = 436, Column = 12 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6254 ftn: VECTOR GATHER_F32, File = m_partitioner.F90, Line = 441 
+  A loop starting at line 441 was not vectorized because a recurrence was found on "global_field" at line 447.
+
+ftn-6202 ftn: VECTOR GATHER_F32, File = m_partitioner.F90, Line = 447 
+  A loop starting at line 447 was replaced by a library call.
+
+ftn-6066 ftn: SCALAR GATHER_F32, File = m_partitioner.F90, Line = 450 
+   A loop nest at line 450 collapsed to a single loop.
+
+ftn-6202 ftn: VECTOR GATHER_F32, File = m_partitioner.F90, Line = 450 
+  A loop starting at line 450 was replaced by a library call.
+
+ftn-3118 ftn: IPA GATHER_F64, File = m_partitioner.F90, Line = 480, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3118 ftn: IPA GATHER_F64, File = m_partitioner.F90, Line = 481, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6005 ftn: SCALAR GATHER_F64, File = m_partitioner.F90, Line = 484 
+  A loop starting at line 484 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR GATHER_F64, File = m_partitioner.F90, Line = 484 
+  A loop starting at line 484 was conditionally vectorized.
+
+ftn-6005 ftn: SCALAR GATHER_F64, File = m_partitioner.F90, Line = 494 
+  A loop starting at line 494 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR GATHER_F64, File = m_partitioner.F90, Line = 494 
+  A loop starting at line 494 was conditionally vectorized.
+
+ftn-3021 ftn: IPA GATHER_F64, File = m_partitioner.F90, Line = 503, Column = 12 
+  "mpi_gather" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA GATHER_F64, File = m_partitioner.F90, Line = 508, Column = 12 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-3021 ftn: IPA GATHER_F64, File = m_partitioner.F90, Line = 510, Column = 12 
+  "mpi_allgather" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3118 ftn: IPA GATHER_F64, File = m_partitioner.F90, Line = 515, Column = 12 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6254 ftn: VECTOR GATHER_F64, File = m_partitioner.F90, Line = 520 
+  A loop starting at line 520 was not vectorized because a recurrence was found on "global_field" at line 526.
+
+ftn-6202 ftn: VECTOR GATHER_F64, File = m_partitioner.F90, Line = 526 
+  A loop starting at line 526 was replaced by a library call.
+
+ftn-6066 ftn: SCALAR GATHER_F64, File = m_partitioner.F90, Line = 529 
+   A loop nest at line 529 collapsed to a single loop.
+
+ftn-6202 ftn: VECTOR GATHER_F64, File = m_partitioner.F90, Line = 529 
+  A loop starting at line 529 was replaced by a library call.
+
+ftn-6334 ftn: VECTOR SETUP_GRID, File = m_partitioner.F90, Line = 552 
+  A loop starting at line 552 was not vectorized because it contains multiple potential exits.
+
+ftn-3021 ftn: IPA GET_NEIGHBOR_RANK, File = m_partitioner.F90, Line = 570, Column = 11 
+  "t$136" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA GET_NEIGHBOR_RANK, File = m_partitioner.F90, Line = 571, Column = 21 
+  "t$138" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA GET_NEIGHBOR_RANK, File = m_partitioner.F90, Line = 572, Column = 21 
+  "t$140" was not inlined because the compiler was unable to locate the routine.
+
+ftn-3021 ftn: IPA GET_NEIGHBOR_RANK, File = m_partitioner.F90, Line = 574, Column = 12 
+  "t$141" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6002 ftn: SCALAR CYCLIC_OFFSET, File = m_partitioner.F90, Line = 586 
+  A loop starting at line 586 was eliminated by optimization.
+
+ftn-6002 ftn: SCALAR CYCLIC_OFFSET, File = m_partitioner.F90, Line = 589 
+  A loop starting at line 589 was eliminated by optimization.
+
+ftn-6002 ftn: SCALAR SETUP_DOMAIN, File = m_partitioner.F90, Line = 614 
+  A loop starting at line 614 was eliminated by optimization.
+
+ftn-3021 ftn: IPA SETUP_DOMAIN, File = m_partitioner.F90, Line = 614, Column = 14 
+  "t$142" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6002 ftn: SCALAR SETUP_DOMAIN, File = m_partitioner.F90, Line = 615 
+  A loop starting at line 615 was eliminated by optimization.
+
+ftn-3021 ftn: IPA SETUP_DOMAIN, File = m_partitioner.F90, Line = 615, Column = 14 
+  "t$144" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6002 ftn: SCALAR SETUP_DOMAIN, File = m_partitioner.F90, Line = 618 
+  A loop starting at line 618 was eliminated by optimization.
+
+ftn-3021 ftn: IPA SETUP_DOMAIN, File = m_partitioner.F90, Line = 618, Column = 13 
+  "t$146" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6002 ftn: SCALAR SETUP_DOMAIN, File = m_partitioner.F90, Line = 619 
+  A loop starting at line 619 was eliminated by optimization.
+
+ftn-3021 ftn: IPA SETUP_DOMAIN, File = m_partitioner.F90, Line = 619, Column = 13 
+  "t$150" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6262 ftn: VECTOR SETUP_DOMAIN, File = m_partitioner.F90, Line = 624 
+  A loop starting at line 624 was not vectorized because it contains a call to a subroutine or function on line 625.
+
+ftn-3021 ftn: IPA SETUP_DOMAIN, File = m_partitioner.F90, Line = 625, Column = 13 
+  "t$157" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6205 ftn: VECTOR SETUP_DOMAIN, File = m_partitioner.F90, Line = 636 
+  A loop starting at line 636 was vectorized with a single vector iteration.
+
+ftn-6271 ftn: VECTOR SETUP_DOMAIN, File = m_partitioner.F90, Line = 637 
+  A loop starting at line 637 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR SETUP_DOMAIN, File = m_partitioner.F90, Line = 637 
+  A loop starting at line 637 was unwound.
+
+ftn-6271 ftn: VECTOR SETUP_DOMAIN, File = m_partitioner.F90, Line = 639 
+  A loop starting at line 639 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR SETUP_DOMAIN, File = m_partitioner.F90, Line = 639 
+  A loop starting at line 639 was unwound.
+
+ftn-3021 ftn: IPA SETUP_DOMAIN, File = m_partitioner.F90, Line = 639, Column = 23 
+  "t$160" was not inlined because the compiler was unable to locate the routine.
+
+ftn-6202 ftn: VECTOR DISTRIBUTE_TO_BINS, File = m_partitioner.F90, Line = 654 
+  A loop starting at line 654 was replaced by a library call.
+
+ftn-6005 ftn: SCALAR DISTRIBUTE_TO_BINS, File = m_partitioner.F90, Line = 658 
+  A loop starting at line 658 was unrolled 2 times.
+
+ftn-6204 ftn: VECTOR DISTRIBUTE_TO_BINS, File = m_partitioner.F90, Line = 658 
+  A loop starting at line 658 was vectorized.
+
+ftn-6005 ftn: SCALAR CUMSUM, File = m_partitioner.F90, Line = 680 
+  A loop starting at line 680 was unrolled 4 times.
+
+ftn-6254 ftn: VECTOR CUMSUM, File = m_partitioner.F90, Line = 680 
+  A loop starting at line 680 was not vectorized because a recurrence was found on "cumsum" at line 681.
+
+ftn-3118 ftn: IPA FIND_MAX_SHAPE, File = m_partitioner.F90, Line = 692, Column = 10 
+  "error" was not inlined because the call site will not flatten.  "mpi_abort_" is missing.
+
+ftn-6271 ftn: VECTOR FIND_MAX_SHAPE, File = m_partitioner.F90, Line = 694 
+  A loop starting at line 694 was not vectorized because its trip count is too small.
+
+ftn-6008 ftn: SCALAR FIND_MAX_SHAPE, File = m_partitioner.F90, Line = 694 
+  A loop starting at line 694 was unwound.
+
+ftn-6005 ftn: SCALAR FIND_MAX_SHAPE, File = m_partitioner.F90, Line = 695 
+  A loop starting at line 695 was unrolled 2 times.
+
+ftn-6213 ftn: VECTOR FIND_MAX_SHAPE, File = m_partitioner.F90, Line = 695 
+  A loop starting at line 695 was conditionally vectorized.
+
+  721.                  
+  722.                  ! vim: set filetype=fortran expandtab tabstop=2 softtabstop=2 :
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
