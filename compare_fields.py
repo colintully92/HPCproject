@@ -20,9 +20,9 @@ import numpy as np
     "--atol", type=float, required=False, default=1e-8, help="Absolute tolerance."
 )
 def main(src, trg, rtol=1e-5, atol=1e-8):
-    src_f = np.load(src)
-    trg_f = np.load(trg)
-
+    src_f = np.fromfile(src,float) #np.load(src)
+    trg_f = np.fromfile(trg,float) #np.load(trg)
+    
     if np.allclose(src_f, trg_f, rtol=rtol, atol=atol, equal_nan=True):
         print(f"HOORAY! '{src}' and '{trg}' are equal!")
     else:

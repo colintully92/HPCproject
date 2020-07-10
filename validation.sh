@@ -15,5 +15,5 @@ echo "running stencil2d-mpiomp.F90 ..."
 srun -n 12 ./stencil2d-mpiomp.x+orig --nx 128 --ny 128 --nz 64 --num_iter 1024
 
 # compare output againts control data
-#echo "running compare_fields.py ..."
-#python compare_fields.py --src="out_field.dat" --trg="out_field.dat"
+echo "running compare_fields.py ..."
+python compare_fields.py --src="out_field_mpi.dat" --trg="out_field_mpiomp.dat"
