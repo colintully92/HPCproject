@@ -39,18 +39,21 @@ program main
     include "pat_apif.h"
     integer :: istat
     
-    !CT ADDED
-    !$omp parallel
-    !$omp master
-    !$ write(*,*) '#threads = ', omp_get_num_threads()
-    !$omp end master
-    !$omp end parallel
-    !CT close
-    
     call PAT_record( PAT_STATE_OFF, istat )
 #endif
 
     call init()
+
+    !CT ADDED
+    if ( is_master() ) then
+        !write(*, '(a)') '# ranks nx ny ny nz num_iter time'
+        !$omp parallel
+        !$omp master
+        write(*, '(a,i)') '# threads = ', omp_get_num_threads()
+        !$omp end master
+        !$omp end parallel
+    end if
+    !CT - close
 
     if ( is_master() ) then
         write(*, '(a)') '# ranks nx ny ny nz num_iter time'
