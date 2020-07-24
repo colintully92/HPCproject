@@ -17,7 +17,7 @@ make VERSION=mpiomp
   #cd ../../Project || exit
 
 # Set the number of threads
-decalre -x nthreads=1
+declare -x nthreads=1
 
 export OMP_NUM_THREADS=$nthreads
   declare -x ncores=$nthreads
@@ -35,7 +35,7 @@ echo "running stencil2d-mpiomp.F90 ..."
 #./run_job.sh
 
 #for running on single node
-srun -n 12 -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+srun -n 2 -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
 
 # compare output against control data
 #echo "running compare_fields.py ..."
