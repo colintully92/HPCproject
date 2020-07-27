@@ -10,33 +10,38 @@ make VERSION=mpi
 make VERSION=mpiomp
 
 # generate reference data
-#echo "running stencil2d-mpi.F90 ..."
+echo "running stencil2d-mpi.F90 ..."
 #cd ../HPC4WC/day3 && \
   #srun stencil2d.py --nx=128 --ny=128 --nz=64 --num_iter=${num_iter} && \
-#srun -n 1 ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+srun -n 12 ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
   #cd ../../Project || exit
 
-# Set the number of threads
-declare -x nthreads=1
+### Running mpiomp version
+declare -x nthreads=1 # Set the number of openMP threads 
+declare -x nnodes=1 #set number of nodes (srun -N #)
+declare -x nmpiranks=12 # set number of mpi ranks (srun -n #), ranks spread over all nodes
 
 export OMP_NUM_THREADS=$nthreads
-  declare -x ncores=$nthreads
+    declare -x ncores=$nthreads
   #sets upper bound on number of threads
   #cannot use more threads then there are cores available (???)
-  if [ $nthreads -gt 24 ] ; then
-   ncores=24
-  fi
+    if [ $nthreads -gt 24 ] ; then
+        ncores=24
+    fi
 
-# run the programm to validate
-echo "running stencil2d-mpiomp.F90 ..."
-
-#for running on multiple nodes
-#requires slurm run jobscript
-#./run_job.sh
-
-#for running on single node
-srun -n 2 -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+if [ $nnodes -eq 1 ]; then
+    # run the programm to validate
+    echo "running stencil2d-mpiomp.F90 ..."
+    #for running on single node
+    srun -N $nnodes -n $nmpiranks -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+else
+    echo "running on multiple nodes"
+    #for running on multiple nodes
+    #requires slurm run jobscript
+    #srun -N $nnodes -n $nmpiranks -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+    ./run_job.sh
+fi
 
 # compare output against control data
-#echo "running compare_fields.py ..."
-#python compare_fields.py --src="out_field_mpi.dat" --trg="out_field_mpiomp.dat"
+echo "running compare_fields.py ..."
+python compare_fields.py --src="out_field_mpi.dat" --trg="out_field_mpiomp.dat"
