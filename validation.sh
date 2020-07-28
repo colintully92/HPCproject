@@ -25,7 +25,7 @@ export OMP_NUM_THREADS=$nthreads
         ncores=24
     fi
 
-if [ $nnodes -eq 1 ]; then 
+if [ $nnodes -eq 0 ]; then 
     # generate reference data
     echo "running stencil2d-mpi.F90 ..."
     #cd ../HPC4WC/day3 && \

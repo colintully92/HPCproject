@@ -1,8 +1,9 @@
 #!/bin/bash -l
 #
 #SBATCH --time=00:30:00
-#SBATCH --nodes=4
-#SBATCH --ntasks-per-node=24
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=20
+#SBATCH --cpus-per-task=1
 
 export OMP_NUM_THREADS=1
 
