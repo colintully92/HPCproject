@@ -1,8 +1,18 @@
 #!/bin/bash -l
 #
-#SBATCH --nodes=$nnodes
-#SBATCH --ntasks-per-node=$nmpiranks
+#SBATCH --time=00:30:00
+#SBATCH --nodes=2
+#SBATCH --ntasks=4
+#SBATCH --ntasks-per-node=2
 
-export OMP_NUM_THREADS=24
+echo "Number of nodes: $SLURM_JOB_NUM_NODES"
 
-srun -N 4 -n 4 ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+# nodes: $SLURM_JOB_NUM_NODES
+# tasks: $SLURM_NTASKS 
+# tasks-per-node: $SLURM_NTASKS_PER_NODE 
+# cpus-per-task: $SLURM_CPUS_PER_TASK
+
+srun ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+
+srun ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+

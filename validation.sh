@@ -9,17 +9,10 @@ module load PrgEnv-cray
 make VERSION=mpi
 make VERSION=mpiomp
 
-# generate reference data
-echo "running stencil2d-mpi.F90 ..."
-#cd ../HPC4WC/day3 && \
-  #srun stencil2d.py --nx=128 --ny=128 --nz=64 --num_iter=${num_iter} && \
-srun -n 12 ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
-  #cd ../../Project || exit
-
-### Running mpiomp version
-declare -x nthreads=1 # Set the number of openMP threads 
-declare -x nnodes=1 #set number of nodes (srun -N #)
-declare -x nmpiranks=12 # set number of mpi ranks (srun -n #), ranks spread over all nodes
+declare -x nnodes=3 #set number of nodes (srun -N #)
+declare -x nmpiranks=24 # set number of mpi ranks (srun -n #), ranks spread over all nodes
+### For running mpiomp version
+declare -x nthreads=3 # Set the number of openMP threads 
 
 export OMP_NUM_THREADS=$nthreads
     declare -x ncores=$nthreads
@@ -29,7 +22,13 @@ export OMP_NUM_THREADS=$nthreads
         ncores=24
     fi
 
-if [ $nnodes -eq 1 ]; then
+if [ $nnodes -eq 1 ]; then 
+    # generate reference data
+    echo "running stencil2d-mpi.F90 ..."
+    #cd ../HPC4WC/day3 && \
+    #srun stencil2d.py --nx=128 --ny=128 --nz=64 --num_iter=${num_iter} && \
+    srun -N $nnodes -n $nmpiranks ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+  #cd ../../Project || exit
     # run the programm to validate
     echo "running stencil2d-mpiomp.F90 ..."
     #for running on single node
@@ -39,7 +38,13 @@ else
     #for running on multiple nodes
     #requires slurm run jobscript
     #srun -N $nnodes -n $nmpiranks -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
-    ./run_job.sh
+    sbatch -C gpu -N $nnodes -n $nmpmpiranks ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+    sbatch -C gpu -N $nnodes -n $nmpiranks -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+    #./run_job.sh
+    #echo "running stencil2d-mpi.F90 ..."
+    #srun -N $nnodes -n $nmpiranks ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
+    #echo "running stencil2d-mpiomp.F90 ..."
+    #srun -N $nnodes -n $nmpiranks -c $ncores ./stencil2d-mpiomp.x --nx 128 --ny 128 --nz 64 --num_iter 1024
 fi
 
 # compare output against control data

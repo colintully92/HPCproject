@@ -21,7 +21,9 @@ import numpy as np
 )
 def main(src, trg, rtol=1e-5, atol=1e-8):
     src_f = np.fromfile(src,float) #np.load(src)
+    #src_f = np.array(src_f)
     trg_f = np.fromfile(trg,float) #np.load(trg)
+    #trg_f = np.array(trg_f)
     
     if np.allclose(src_f, trg_f, rtol=rtol, atol=atol, equal_nan=True):
         print(f"HOORAY! '{src}' and '{trg}' are equal!")
