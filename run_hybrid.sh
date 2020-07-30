@@ -6,7 +6,10 @@
 #SBATCH --ntasks-per-node=8
 
 export OMP_NUM_THREADS=3
-#INSERT OpenMP tuning here
+
+#"<static/dynamic/guided> , <chunk size>(default 1)"
+export OMP_SCHEDULE="DYNAMIC"
+echo "Loop scheduling: $OMP_SCHEDULE" 
 
 echo "Number of nodes: $SLURM_JOB_NUM_NODES"
 
