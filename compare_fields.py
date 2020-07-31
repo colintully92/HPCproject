@@ -21,15 +21,28 @@ import numpy as np
 )
 def main(src, trg, rtol=1e-5, atol=1e-8):
     src_f = np.fromfile(src,float) #np.load(src)
+    print(np.shape(src_f))
     #src_f = np.array(src_f)
     trg_f = np.fromfile(trg,float) #np.load(trg)
+    print(np.shape(trg_f))
     #trg_f = np.array(trg_f)
+    truth = np.zeros(len(src_f))
+    
+    for i in range (0,len(src_f)):
+        if np.allclose(src_f[i], trg_f[i], rtol=rtol, atol=atol, equal_nan=True): 
+            #src_f[i] == trg_f[i]:
+            truth[i] = 1
+        else:
+            print('not equal at this point:', i, src_f[i], trg_f[i])
+            truth[i] = 0
     
     if np.allclose(src_f, trg_f, rtol=rtol, atol=atol, equal_nan=True):
         print(f"HOORAY! '{src}' and '{trg}' are equal!")
     else:
         print(f"{src} and {trg} are not equal.")
-
+        
+    print(truth)
+    np.savetxt('equivalence.out', truth)
 
 if __name__ == "__main__":
     main()

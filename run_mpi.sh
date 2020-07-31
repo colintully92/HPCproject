@@ -1,9 +1,10 @@
 #!/bin/bash -l
 #
 #SBATCH --time=00:30:00
-#SBATCH --ntasks=80
-#SBATCH --nodes=10
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks=20
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=20
+#SBATCH --ntasks-per-core=2
 
 srun ./stencil2d-mpi.x --nx 128 --ny 128 --nz 64 --num_iter 1024
 

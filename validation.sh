@@ -5,7 +5,7 @@
 
 #OPTIONAL clean before starting 
 #If you want to keep the job run files then comment this out
-make clean 
+#make clean 
 
 #General commands to run on daint
 module unload PrgEnv-gnu

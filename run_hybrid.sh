@@ -1,11 +1,12 @@
 #!/bin/bash -l
 #
 #SBATCH --time=00:30:00
-#SBATCH --ntasks=80
-#SBATCH --nodes=10
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks=20
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=20
+#SBATCH --ntasks-per-core=2
 
-export OMP_NUM_THREADS=3
+export OMP_NUM_THREADS=1
 #INSERT OpenMP tuning here
 
 echo "Number of nodes: $SLURM_JOB_NUM_NODES"
