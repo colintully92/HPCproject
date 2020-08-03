@@ -145,7 +145,7 @@ contains
         ! local
         !!real (kind=wp), save, allocatable :: tmp1_field(:, :)
         !real (kind=wp), save, allocatable :: tmp2_field(:, :)
-        real (kind=wp) :: laplap
+        real (kind=wp), save, allocatable :: laplap(:, :)
         integer :: iter, i, j, k
         integer :: dims(3), nx, ny, nz
 
@@ -153,6 +153,23 @@ contains
         nx = dims(1) - 2 * p%num_halo()
         ny = dims(2) - 2 * p%num_halo()
         nz = dims(3)
+
+
+         ! this is only done the first time this subroutine is called (warmup)
+        ! or when the dimensions of the fields change
+        if ( allocated(laplap) .and. &
+           any( shape(laplap) /= (/nx + 2 * num_halo, ny + 2 * num_halo /) ) ) then
+           deallocate(laplap)
+        end if
+        if ( .not. allocated(laplap) ) then
+          allocate( laplap(nx + 2 * num_halo, ny + 2 * num_halo) )
+          !  allocate( tmp2_field(nx + 2 * num_halo, ny + 2 * num_halo, nz) )
+            laplap = 0.0_wp
+            !tmp2_field = 0.0_wp
+        end if
+
+
+
 
         ! this is only done the first time this subroutine is called (warmup)
         ! or when the dimensions of the fields change
@@ -174,22 +191,22 @@ contains
             !CT ADDED
              !$omp parallel do default(none) private(laplap)  shared(in_field, out_field, nx, ny, nz, num_halo, num_iter, alpha)
              do k = lbound(out_field,3), ubound(out_field,3) 
-                !do j = lbound(out_field,2) + num_halo - 1, ubound(out_field,2) - num_halo + 1
-                !do i = lbound(out_field,1) + num_halo - 1, ubound(out_field,1) - num_halo + 1
+                do j = lbound(out_field,2) + num_halo - 1, ubound(out_field,2) - num_halo + 1
+                do i = lbound(out_field,1) + num_halo - 1, ubound(out_field,1) - num_halo + 1
                    ! tmp1_field(i, j) = -4._wp * in_field(i, j, k)        &
                   !      + in_field(i - 1, j, k) + in_field(i + 1, j, k)  &
                  !       + in_field(i, j - 1, k) + in_field(i, j + 1, k)
                 !end do
                 !end do
 
-                do j = lbound(out_field,2) + num_halo, ubound(out_field,2) - num_halo
-                do i = lbound(out_field,1) + num_halo, ubound(out_field,1) - num_halo
+            !    do j = lbound(out_field,2) + num_halo, ubound(out_field,2) - num_halo
+             !   do i = lbound(out_field,1) + num_halo, ubound(out_field,1) - num_halo
                 
-                    laplap = (-4._wp)             &
+                    laplap(i, j) = (-4._wp)*             &
                         !* tmp1_field(i, j)       &
-                        *(-4._wp) * in_field(i, j, k)        &
+                        ((-4._wp) * in_field(i, j, k)        &
                         + in_field(i - 1, j, k) + in_field(i + 1, j, k)  &
-                        + in_field(i, j - 1, k) + in_field(i, j + 1, k)  &
+                        + in_field(i, j - 1, k) + in_field(i, j + 1, k))  &
                         !+ tmp1_field(i - 1, j) &
                         -4._wp * in_field(i -1, j, k)        &
                         + in_field(i - 2, j, k) + in_field(i, j, k)  &
@@ -207,11 +224,17 @@ contains
                         + in_field(i - 1, j + 1, k) + in_field(i + 1, j + 1, k)  &
                         + in_field(i, j, k) + in_field(i, j + 2, k)
 
+                end do 
+                end do 
+                
+                do j = lbound(out_field,2) + num_halo, ubound(out_field,2) -num_halo
+                do i = lbound(out_field,1) + num_halo, ubound(out_field,1) -num_halo 
+
 
                     if ( iter == num_iter ) then
-                        out_field(i, j, k) = in_field(i, j, k) - alpha * laplap
+                        out_field(i, j, k) = in_field(i, j, k) - alpha *laplap(i, j)
                     else
-                        in_field(i, j, k)  = in_field(i, j, k) - alpha * laplap
+                        in_field(i, j, k)  = in_field(i, j, k) - alpha *laplap(i, j)
                     end if
                     
                 end do
