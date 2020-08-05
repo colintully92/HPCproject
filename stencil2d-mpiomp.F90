@@ -32,7 +32,7 @@ program main
     integer :: cur_setup, num_setups = 1
     integer :: nx_setups(7) = (/ 16, 32, 48, 64, 96, 128, 192 /)
     integer :: ny_setups(7) = (/ 16, 32, 48, 64, 96, 128, 192 /)
-
+!CT - close
     type(Partitioner) :: p
 
 #ifdef CRAYPAT
@@ -46,7 +46,6 @@ program main
 
     !CT ADDED
     if ( is_master() ) then
-        !write(*, '(a)') '# ranks nx ny ny nz num_iter time'
         !$omp parallel
         !$omp master
         write(*, '(a,i)') '# threads = ', omp_get_num_threads()
@@ -55,8 +54,8 @@ program main
     end if
     !CT - close
 
-    if ( is_master() ) then
-        write(*, '(a)') '# ranks nx ny ny nz num_iter time'
+    if ( is_master() ) then !CT - added 05/08/20 flop and byte
+        write(*, '(a)') '# ranks nx ny ny nz num_iter time flop byte'
         write(*, '(a)') 'data = np.array( [ \'
     end if
 
@@ -80,7 +79,6 @@ program main
 
         f_in = p%scatter(in_field, root=0)
         allocate(f_out, source=f_in)
-
         ! warmup caches
         call apply_diffusion( f_in, f_out, alpha, num_iter=1, p=p )
 
@@ -90,7 +88,6 @@ program main
 #endif
         timer_work = -999
         call timer_start('work', timer_work)
-
         call apply_diffusion( f_in, f_out, alpha, num_iter=num_iter, p=p )
 
         call timer_end( timer_work )
@@ -109,11 +106,12 @@ program main
             call cleanup()
 
         runtime = timer_get( timer_work )
+        !CT - close
         if ( is_master() ) &
             write(*, '(a, i5, a, i5, a, i5, a, i5, a, i8, a, e15.7, a)') &
                 '[', num_rank(), ',', global_nx, ',', global_ny, ',', global_nz, &
-                ',', num_iter, ',', runtime, '], \'
-
+                ',', num_iter, ',', runtime, '], \' 
+!CT - close
     end do
 
     if ( is_master() ) then
@@ -169,7 +167,7 @@ contains
 
         do iter = 1, num_iter
 
-            call update_halo( in_field, p )
+            call update_halo( in_field, p)
             
             !CT ADDED
              !$omp parallel do default(none) private(tmp1_field, laplap) shared(in_field, out_field, nx, ny, nz, num_halo, num_iter, alpha)
@@ -188,7 +186,6 @@ contains
                     laplap = -4._wp * tmp1_field(i, j)       &
                         + tmp1_field(i - 1, j) + tmp1_field(i + 1, j)  &
                         + tmp1_field(i, j - 1) + tmp1_field(i, j + 1)
-                        
                     if ( iter == num_iter ) then
                         out_field(i, j, k) = in_field(i, j, k) - alpha * laplap
                     else
@@ -268,7 +265,7 @@ contains
     !
     !  Note: corners are updated in the left/right phase of the halo-update
     !
-    subroutine update_halo( field, p )
+    subroutine update_halo( field, p)
         use mpi !, only : MPI_FLOAT, MPI_DOUBLE, MPI_SUCCESS, MPI_STATUS_SIZE, &
              !Irecv, MPI_Isend, MPI_Waitall
         use m_utils, only : error
@@ -513,8 +510,30 @@ contains
         call error(num_iter < 1 .or. num_iter > 1024*1024, "Please provide a reasonable value of num_iter")
 
     end subroutine read_cmd_line_arguments
+    
+    !CT - ADDED 05/08/20
+    function get_global_counter( counter, average )
+        use mpi, only : MPI_COMM_WORLD, MPI_DOUBLE_PRECISION, MPI_SUM
+        use m_utils, only : num_rank
+        implicit none
 
+        ! argument
+        real (kind=8) :: get_global_counter
+        integer (kind=8) :: counter
+        logical, optional :: average
 
+        ! local
+        real (kind=8) :: global_counter
+        integer :: ierror
+
+        call MPI_REDUCE( dble( counter ), global_counter, 1, MPI_DOUBLE_PRECISION, MPI_SUM, 0, MPI_COMM_WORLD, ierror )
+        if ( present(average) ) then
+            if ( average ) global_counter = global_counter / dble( num_rank() )
+        end if
+        get_global_counter = global_counter
+        
+    end function get_global_counter
+    !CT - close
     ! cleanup at end of work
     ! (report timers, free memory)
     subroutine cleanup()
