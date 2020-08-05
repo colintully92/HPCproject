@@ -32,7 +32,10 @@ program main
     integer :: cur_setup, num_setups = 1
     integer :: nx_setups(7) = (/ 16, 32, 48, 64, 96, 128, 192 /)
     integer :: ny_setups(7) = (/ 16, 32, 48, 64, 96, 128, 192 /)
-
+!CT - ADDED 05/08/20
+    integer (kind=8) :: flop_counter = 0, byte_counter = 0
+    real (kind=8) :: global_flop_counter, global_byte_counter
+!CT - close
     type(Partitioner) :: p
 
 #ifdef CRAYPAT
@@ -46,7 +49,6 @@ program main
 
     !CT ADDED
     if ( is_master() ) then
-        !write(*, '(a)') '# ranks nx ny ny nz num_iter time'
         !$omp parallel
         !$omp master
         write(*, '(a,i)') '# threads = ', omp_get_num_threads()
@@ -55,8 +57,8 @@ program main
     end if
     !CT - close
 
-    if ( is_master() ) then
-        write(*, '(a)') '# ranks nx ny ny nz num_iter time'
+    if ( is_master() ) then !CT - added 05/08/20 flop and byte
+        write(*, '(a)') '# ranks nx ny ny nz num_iter time flop byte'
         write(*, '(a)') 'data = np.array( [ \'
     end if
 
@@ -80,9 +82,9 @@ program main
 
         f_in = p%scatter(in_field, root=0)
         allocate(f_out, source=f_in)
-
+!CT - added 05/08/20 increase counters
         ! warmup caches
-        call apply_diffusion( f_in, f_out, alpha, num_iter=1, p=p )
+        call apply_diffusion( f_in, f_out, alpha, num_iter=1, p=p, increase_counters=.false. )
 
         ! time the actual work
 #ifdef CRAYPAT
@@ -90,15 +92,15 @@ program main
 #endif
         timer_work = -999
         call timer_start('work', timer_work)
-
-        call apply_diffusion( f_in, f_out, alpha, num_iter=num_iter, p=p )
+!CT - added 05/08/20 increase counters
+        call apply_diffusion( f_in, f_out, alpha, num_iter=num_iter, p=p, increase_counters=.true. )
 
         call timer_end( timer_work )
 #ifdef CRAYPAT
         call PAT_record( PAT_STATE_OFF, istat )
 #endif
 
-        call update_halo( f_out, p )
+        call update_halo( f_out, p, increase_counters=.false. )
 
         out_field = p%gather(f_out, root=0)
 
@@ -109,11 +111,17 @@ program main
             call cleanup()
 
         runtime = timer_get( timer_work )
+        !CT - added 05/08/20
+        global_flop_counter = get_global_counter( flop_counter )
+        global_byte_counter = get_global_counter( byte_counter )
+        !CT - close
+        !CT - added 05/08/20 flop and byte counters
         if ( is_master() ) &
             write(*, '(a, i5, a, i5, a, i5, a, i5, a, i8, a, e15.7, a)') &
                 '[', num_rank(), ',', global_nx, ',', global_ny, ',', global_nz, &
-                ',', num_iter, ',', runtime, '], \'
-
+                ',', num_iter, ',', runtime, &
+                ',', global_flop_counter, ',', global_byte_counter, '], \' 
+!CT - close
     end do
 
     if ( is_master() ) then
@@ -132,7 +140,7 @@ contains
     !  alpha             -- diffusion coefficient (dimensionless)
     !  num_iter          -- number of iterations to execute
     !
-    subroutine apply_diffusion( in_field, out_field, alpha, num_iter, p )
+    subroutine apply_diffusion( in_field, out_field, alpha, num_iter, p, increase_counters )
         implicit none
 
         ! arguments
@@ -141,6 +149,7 @@ contains
         real (kind=wp), intent(in) :: alpha
         integer, intent(in) :: num_iter
         type(Partitioner), intent(in) :: p
+        logical, intent(in) :: increase_counters
 
         ! local
         real (kind=wp), save, allocatable :: tmp1_field(:, :)
@@ -169,7 +178,7 @@ contains
 
         do iter = 1, num_iter
 
-            call update_halo( in_field, p )
+            call update_halo( in_field, p, increase_counters=increase_counters )
             
             !CT ADDED
              !$omp parallel do default(none) private(tmp1_field, laplap) shared(in_field, out_field, nx, ny, nz, num_halo, num_iter, alpha)
@@ -188,9 +197,12 @@ contains
                     laplap = -4._wp * tmp1_field(i, j)       &
                         + tmp1_field(i - 1, j) + tmp1_field(i + 1, j)  &
                         + tmp1_field(i, j - 1) + tmp1_field(i, j + 1)
-                        
+                    if (increase_counters) flop_counter = flop_counter + 5
+                    if (increase_counters) byte_counter = byte_counter + 6 * wp
                     if ( iter == num_iter ) then
                         out_field(i, j, k) = in_field(i, j, k) - alpha * laplap
+                        if (increase_counters) flop_counter = flop_counter + 2
+                        if (increase_counters) byte_counter = byte_counter + 3 * wp
                     else
                         in_field(i, j, k)  = in_field(i, j, k) - alpha * laplap
                     end if
@@ -268,7 +280,7 @@ contains
     !
     !  Note: corners are updated in the left/right phase of the halo-update
     !
-    subroutine update_halo( field, p )
+    subroutine update_halo( field, p, increase_counters)
         use mpi !, only : MPI_FLOAT, MPI_DOUBLE, MPI_SUCCESS, MPI_STATUS_SIZE, &
              !Irecv, MPI_Isend, MPI_Waitall
         use m_utils, only : error
@@ -277,6 +289,7 @@ contains
         ! argument
         real (kind=wp), intent(inout) :: field(:, :, :)
         type(Partitioner), intent(in) :: p
+        logical, intent(in) :: increase_counters
 
         ! local
         integer :: i, j, k
@@ -336,6 +349,7 @@ contains
             icount = icount + 1
             sndbuf_t(icount) = field(i, j + ny, k)
             sndbuf_b(icount) = field(i, j + num_halo, k)
+            if ( increase_counters ) byte_counter = byte_counter + 2 * wp
         end do
         end do
         end do
@@ -358,6 +372,7 @@ contains
             icount = icount + 1
             sndbuf_r(icount) = field(i + nx, j, k)
             sndbuf_l(icount) = field(i + num_halo, j, k)
+            if ( increase_counters ) byte_counter = byte_counter + 2 * wp
         end do
         end do
         end do
@@ -375,6 +390,7 @@ contains
             icount = icount + 1
             field(i, j, k) = rcvbuf_b(icount)
             field(i, j + num_halo + ny, k) = rcvbuf_t(icount)
+            if ( increase_counters ) byte_counter = byte_counter + 2 * wp
         end do
         end do
         end do
@@ -391,6 +407,7 @@ contains
             icount = icount + 1
             field(i, j, k) = rcvbuf_l(icount)
             field(i + num_halo + nx, j, k) = rcvbuf_r(icount)
+            if ( increase_counters ) byte_counter = byte_counter + 2 * wp
         end do
         end do
         end do
@@ -513,8 +530,30 @@ contains
         call error(num_iter < 1 .or. num_iter > 1024*1024, "Please provide a reasonable value of num_iter")
 
     end subroutine read_cmd_line_arguments
+    
+    !CT - ADDED 05/08/20
+    function get_global_counter( counter, average )
+        use mpi, only : MPI_COMM_WORLD, MPI_DOUBLE_PRECISION, MPI_SUM
+        use m_utils, only : num_rank
+        implicit none
 
+        ! argument
+        real (kind=8) :: get_global_counter
+        integer (kind=8) :: counter
+        logical, optional :: average
 
+        ! local
+        real (kind=8) :: global_counter
+        integer :: ierror
+
+        call MPI_REDUCE( dble( counter ), global_counter, 1, MPI_DOUBLE_PRECISION, MPI_SUM, 0, MPI_COMM_WORLD, ierror )
+        if ( present(average) ) then
+            if ( average ) global_counter = global_counter / dble( num_rank() )
+        end if
+        get_global_counter = global_counter
+        
+    end function get_global_counter
+    !CT - close
     ! cleanup at end of work
     ! (report timers, free memory)
     subroutine cleanup()
